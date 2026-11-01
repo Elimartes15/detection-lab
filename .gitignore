@@ -1,0 +1,17 @@
+# OPNsense config backups: contain password hashes, certificate private keys
+01-network/OPNsensebackup*/
+config-*.xml
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+terraform.tfvars
+
+# Ansible
+*.vault
+vault_pass*
+
+# OS clutter
+Thumbs.db
+.DS_Store
