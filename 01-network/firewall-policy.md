@@ -16,7 +16,7 @@ Baseline policy for every lab zone. Service rules (AD to DC01, Elastic ingest to
 
 | Alias | Type | Value |
 | --- | --- | --- |
-| `Home_LAB` | Network | `10.0.0.0/24` |
+| `Home_LAN` | Network | `10.0.0.0/24` |
 | `LAB_NETS` | Network | `10.10.0.0/16` |
 | `RFC1918` | Network | `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` |
 | `AD_Ports` | Port(s) | 53, 88, 135, 389, 445, 464, 636, 3268, 3269, 49152:65535 |
