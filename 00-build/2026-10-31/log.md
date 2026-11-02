@@ -1,6 +1,6 @@
 # Build Log · through 2026-10-31
 
-[Build log index](../build-log.md) · [← 2026-10-29](../2026-10-29/log.md)
+[Build log index](../build-log.md) · [← 2026-10-29](../2026-10-29/log.md) · [2026-11-01 →](../2026-11-01/log.md)
 
 Cumulative log: every day from 2026-10-17 up to and including 2026-10-31. Newest day last.
 

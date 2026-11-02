@@ -88,6 +88,6 @@ Detailed diagrams of the bridge, VLAN tagging and traffic flows: [virtual networ
 - [x] Windows 11 template (sysprep), WS02 cloned, both clients domain-joined
 - [x] Sysmon and Elastic Agent on DC01, WS01, WS02 (all Healthy)
 - [x] Audit policy GPO + PowerShell logging (4688 and 4104 verified)
-- [ ] Scenario 001
+- [x] Scenario 001: [PowerShell with an encoded command](scenarios/001-powershell-encoded-command/README.md)
 - [x] Kali on mini PC 1, attacker zone verified
 - [ ] DMZ target
