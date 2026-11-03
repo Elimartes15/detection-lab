@@ -13,7 +13,7 @@ references:
     - https://github.com/SigmaHQ/sigma/blob/master/rules/windows/process_creation/proc_creation_win_powershell_encode.yml
     - https://attack.mitre.org/techniques/T1059/001/
     - https://attack.mitre.org/techniques/T1027/
-author: Eli
+author: Eli, frack113 (original SigmaHQ rule)
 license: DRL-1.1
 date: 2026-11-01
 tags:

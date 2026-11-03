@@ -4,6 +4,6 @@ Sigma is the source of truth. Each rule is converted with pySigma: to EQL for El
 
 Licensed under the [Detection Rule License 1.1](LICENSE.md).
 
-| Rule | ATT&CK | Sigma | Elastic | KQL | Scenario |
-| --- | --- | --- | --- | --- | --- |
-| PowerShell Launched With an Encoded Command | T1059.001, T1027 | [yml](sigma/windows/process_creation/proc_creation_win_powershell_encoded_command.yml) | [eql](elastic/proc_creation_win_powershell_encoded_command.eql) | [kql](kql/proc_creation_win_powershell_encoded_command.kql) | [001](../scenarios/001-powershell-encoded-command/README.md) |
+| Rule | ATT&CK | Sigma | Elastic | KQL | Scenario | Credit |
+| --- | --- | --- | --- | --- | --- | --- |
+| PowerShell Launched With an Encoded Command | T1059.001, T1027 | [yml](sigma/windows/process_creation/proc_creation_win_powershell_encoded_command.yml) | [eql](elastic/proc_creation_win_powershell_encoded_command.eql) | [kql](kql/proc_creation_win_powershell_encoded_command.kql) | [001](../scenarios/001-powershell-encoded-command/README.md) | Adapted from [SigmaHQ fb843269](https://github.com/SigmaHQ/sigma/blob/master/rules/windows/process_creation/proc_creation_win_powershell_encode.yml) (frack113) |
