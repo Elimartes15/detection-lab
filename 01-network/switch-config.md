@@ -8,8 +8,9 @@ Interface and management configuration as of 2026-10-26. Credentials and unrelat
 | --- | --- | --- | --- |
 | Fa0/3 | TRUNK-PVE01 | 802.1Q trunk, native 999, allowed 10,20,30,40,50,60,100, DTP off | Dell G5 (`nic0`) |
 | Fa0/19 | KALI | Access VLAN 50, portfast, BPDU guard | Mini PC 1 (Kali, `10.10.50.10`) |
+| Fa0/20 | CTL01 | Access VLAN 10, portfast, BPDU guard | Mini PC 2 (`ctl01`, GitLab, `10.10.10.20`) |
 | Fa0/24 | UPLINK-MODEM | Access VLAN 100, portfast | Home router |
-| Fa0/1–2, Fa0/4–18, Fa0/20–23, Gi0/1–2 | UNUSED | Access VLAN 999 | Shut down |
+| Fa0/1–2, Fa0/4–18, Fa0/21–23, Gi0/1–2 | UNUSED | Access VLAN 999 | Shut down |
 
 ## VLANs
 
@@ -41,13 +42,21 @@ interface FastEthernet0/19
  spanning-tree portfast
  spanning-tree bpduguard enable
 !
+interface FastEthernet0/20
+ description CTL01
+ switchport access vlan 10
+ switchport mode access
+ switchport nonegotiate
+ spanning-tree portfast
+ spanning-tree bpduguard enable
+!
 interface FastEthernet0/24
  description UPLINK-MODEM
  switchport access vlan 100
  switchport mode access
  spanning-tree portfast
 !
-! Every unused port (Fa0/1-2, Fa0/4-18, Fa0/20-23, Gi0/1-2):
+! Every unused port (Fa0/1-2, Fa0/4-18, Fa0/21-23, Gi0/1-2):
 interface <unused port>
  description UNUSED
  switchport access vlan 999

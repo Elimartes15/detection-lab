@@ -30,7 +30,7 @@ The same five rules on each interface. Replace `<ZONE>` with the interface name.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Pass | TCP/UDP | `<ZONE> net` | `<ZONE> address` | 53 | | DNS to own gateway |
 | 2 | Pass | ICMP | `<ZONE> net` | `<ZONE> address` | | | Ping own gateway |
-| 3 | Block | any | `<ZONE> net` | `Home_ROGERS` | | ✓ | Lab to home: never |
+| 3 | Block | any | `<ZONE> net` | `Home_LAN` | | ✓ | Lab to home: never |
 | 4 | Block | any | `<ZONE> net` | `RFC1918` | | ✓ | No cross-zone by default |
 | 5 | Pass | any | `<ZONE> net` | any | | | Internet |
 
@@ -44,7 +44,7 @@ DHCP needs no rule. OPNsense allows it automatically on interfaces where Dnsmasq
 | 2 | Pass | ICMP | `ATTACKER net` | `ATTACKER address` | | | Ping own gateway |
 | 3 | Pass | any | `ATTACKER net` | `DMZ net` | | ✓ | The DMZ is the target |
 | 4 | Block | any | `ATTACKER net` | `LAB_NETS` | | ✓ | Lateral movement attempt |
-| 5 | Block | any | `ATTACKER net` | `Home_ROGERS` | | ✓ | Lab to home: never |
+| 5 | Block | any | `ATTACKER net` | `Home_LAN` | | ✓ | Lab to home: never |
 | 6 | Block | any | `ATTACKER net` | `RFC1918` | | ✓ | Any other private range |
 | 7 | Pass | any | `ATTACKER net` | any | | | Internet for tooling |
 
@@ -103,4 +103,6 @@ Temporary, single-host access from `10.0.0.18/32` until administration moves to 
 | Port forward | TCP → `10.0.0.91:33891` | `10.10.20.10:3389` | RDP to DC01 |
 | Port forward | TCP → `10.0.0.91:33892` | `10.10.30.21:3389` | RDP to WS01 |
 | Port forward | TCP → `10.0.0.91:33893` | `10.10.30.22:3389` | RDP to WS02 |
+| Port forward | TCP → `10.0.0.91:2223` | `10.10.10.20:22` | SSH to `ctl01` |
+| Port forward | TCP → `10.0.0.91:8929` | `10.10.10.20:8929` | GitLab web (`gitlab.cybereli.local`) |
 

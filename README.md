@@ -2,13 +2,33 @@
 
 A segmented, Microsoft-style business network built on a single Proxmox hypervisor, used to emulate attacks, collect telemetry in Elastic Security, and build detections as code (Sigma, Elastic rules, KQL, YARA).
 
-**Status:** 🟡 Build phase. Proxmox, switch trunking, OPNsense, lab VLANs and DHCP are up. Next: firewall policy and the Elastic SIEM VM. SIEM switched from Wazuh to Elastic ([why](docs/2026-10-20-why-elastic-over-wazuh.md)).
+**Status:** 🟡 Build phase. Network, firewall, Active Directory, Elastic SIEM with Windows telemetry, and the first detection (Scenario 001) are done. GitLab runs on the control node. Next: CI runner and the detection-as-code pipeline. SIEM switched from Wazuh to Elastic ([why](docs/2026-10-20-why-elastic-over-wazuh.md)).
 
 ## Goals
 
 - **Detection engineering:** emulate ATT&CK techniques, capture telemetry, write and validate detections, document false positives and gaps.
 - **Networking:** VLAN design, 802.1Q trunking, switch hardening, firewall policy with written rationale.
 - **Systems:** Proxmox, Windows Server Active Directory, Group Policy, Windows 11, Linux.
+- **Detection as code (CI/CD):** detections live in a self-hosted GitLab and ship through a pipeline that lints, converts, validates and deploys them. No rule reaches the SIEM by hand.
+- **Infrastructure as code:** Terraform builds VMs on Proxmox and Ansible configures them, so any part of the lab can be rebuilt from the repo.
+
+## Detection-as-code pipeline
+
+🚧 GitLab is running; the runner and pipeline are the next build steps.
+
+```mermaid
+flowchart LR
+    DEV["Sigma rule<br/>written on the laptop"] -->|git push| GL["GitLab CE<br/>ctl01 · source of truth"]
+    GL --> LINT["sigma check<br/>syntax + style"]
+    LINT --> CONV["sigma convert<br/>EQL for Elastic · KQL for Defender"]
+    CONV --> VAL["Validate<br/>fields exist in real data"]
+    VAL -->|main branch only| DEP["Deploy<br/>Elastic detection rules API"]
+    GL -.->|push mirror| GH["GitHub<br/>public showcase"]
+```
+
+- **GitLab is the source of truth.** Every change goes through GitLab, and its CI runner sits inside the lab, next to the SIEM it deploys to.
+- **GitHub is a read-only mirror.** GitLab pushes to it automatically, so this public repo always matches what's actually deployed. Nothing is edited on GitHub.
+- **Validation exists because of a real bug.** In [Scenario 001](scenarios/001-powershell-encoded-command/README.md), the converted rule referenced a field that the lab's data may not contain. The pipeline checks converted queries against real data before deploying them.
 
 ## Hardware
 
@@ -16,7 +36,7 @@ A segmented, Microsoft-style business network built on a single Proxmox hypervis
 | --- | --- | --- |
 | Dell G5 5000 | i5-10400F (6c/12t), 32 GB RAM, 2 x ~476 GB SSD | Proxmox VE hypervisor |
 | Lenovo ThinkCentre (mini PC 1) | i3-4130T, 8 GB RAM | Kali Linux attacker (bare metal) |
-| Lenovo ThinkCentre (mini PC 2) | i3-4130T, 8 GB RAM | Automation control node, Terraform + Ansible (planned) |
+| Lenovo ThinkCentre (mini PC 2) | i3-4130T, 8 GB RAM | Control node `ctl01`: GitLab CE (running), CI runner, Terraform + Ansible (planned) |
 | Cisco WS-C2950G-24-EI | 24 x 100 Mbps, 2 x GBIC slots (1000BASE-SX installed) | Core switch, 802.1Q trunk |
 
 ## Architecture
@@ -26,6 +46,7 @@ flowchart TB
     HR["Home router<br/>10.0.0.1"] ---|"Fa0/24 · VLAN 100"| SW["Cisco 2950G-24-EI"]
     SW ---|"Fa0/3 trunk"| OPN
     SW ---|"Fa0/19 · VLAN 50"| KALI["Mini PC 1<br/>Kali 10.10.50.10"]
+    SW ---|"Fa0/20 · VLAN 10"| CTL["Mini PC 2<br/>ctl01 · GitLab 10.10.10.20"]
     subgraph PVE["Dell G5 · Proxmox VE"]
         OPN["OPNsense firewall"]
         OPN --- MGMT["VLAN 10 · Mgmt"]
@@ -43,7 +64,7 @@ Detailed diagrams of the bridge, VLAN tagging and traffic flows: [virtual networ
 | VLAN | Name | Subnet | Hosts |
 | --- | --- | --- | --- |
 | 100 | Home | 10.0.0.0/24 | Proxmox mgmt .90, OPNsense WAN .91 |
-| 10 | Mgmt | 10.10.10.0/24 | Switch SVI, OPNsense admin |
+| 10 | Mgmt | 10.10.10.0/24 | Switch SVI, OPNsense admin, `ctl01` `.20` (GitLab, mini PC 2) |
 | 20 | Servers | 10.10.20.0/24 | DC01 (`cybereli.local`) |
 | 30 | Clients | 10.10.30.0/24 | WS01 `.21`, WS02 `.22` (domain-joined, reserved DHCP) |
 | 40 | DMZ | 10.10.40.0/24 | Ubuntu web target |
@@ -55,6 +76,7 @@ Detailed diagrams of the bridge, VLAN tagging and traffic flows: [virtual networ
 
 ```
 ├── README.md
+├── .gitlab-ci.yml            detection-as-code pipeline (planned)
 ├── 00-build/                 hypervisor install, storage, ISO hashes, build log
 ├── 01-network/               switch config, OPNsense, firewall rules + rationale
 ├── 02-active-directory/      domain build, GPOs, intentional misconfigurations
@@ -66,6 +88,7 @@ Detailed diagrams of the bridge, VLAN tagging and traffic flows: [virtual networ
 │   └── yara/
 ├── scenarios/                one folder per attack → detect write-up
 ├── coverage/                 ATT&CK Navigator layer
+├── infra/                    Terraform (Proxmox VMs) + Ansible (configuration) (planned)
 └── docs/                     design decisions
 ```
 
@@ -90,4 +113,6 @@ Detailed diagrams of the bridge, VLAN tagging and traffic flows: [virtual networ
 - [x] Audit policy GPO + PowerShell logging (4688 and 4104 verified)
 - [x] Scenario 001: [PowerShell with an encoded command](scenarios/001-powershell-encoded-command/README.md)
 - [x] Kali on mini PC 1, attacker zone verified
+- [x] Control node `ctl01` + GitLab CE ([build log](00-build/2026-11-02/log.md))
+- [ ] GitLab Runner, push mirror to GitHub, CI pipeline
 - [ ] DMZ target

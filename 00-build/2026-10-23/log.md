@@ -295,9 +295,9 @@ Alpine LXC (CT 101) on `vmbr0`, re-tagged per test:
 ### Firewall baseline (started)
 
 - OPNsense config backup downloaded before any change (kept locally, never committed: it contains password hashes and certificate keys).
-- Aliases created: `Home_ROGERS` (`10.0.0.0/24`), `LAB_NETS` (`10.10.0.0/16`), `RFC1918` (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`).
+- Aliases created: `Home_LAN` (`10.0.0.0/24`), `LAB_NETS` (`10.10.0.0/16`), `RFC1918` (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`).
 - Approach: baseline rules on every zone first, service rules added with the VM that needs them (DD-016). Policy in [firewall policy](../../01-network/firewall-policy.md).
-- CLIENTS (VLAN 30): first rules in place: ping to own gateway, block `Home_ROGERS` (logged), allow internet.
+- CLIENTS (VLAN 30): first rules in place: ping to own gateway, block `Home_LAN` (logged), allow internet.
 
 ### Next
 
