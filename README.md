@@ -1,6 +1,6 @@
-# Purple Team Lab
+# Detection Engineering Lab
 
-A segmented, Microsoft-style business network built on a single Proxmox hypervisor, used to emulate attacks, collect telemetry in Elastic Security, and build detections as code (Sigma, Elastic rules, KQL, YARA).
+A segmented, Microsoft-style business network built on a single node Proxmox hypervisor, used to emulate attacks, collect telemetry in Elastic Security, and build detections as code (Sigma, Elastic rules,CI/CD).
 
 **Status:** 🟡 Build phase. Network, firewall, Active Directory, Elastic SIEM with Windows telemetry, and the first detection (Scenario 001) are done. GitLab runs on the control node. Next: CI runner and the detection-as-code pipeline. SIEM switched from Wazuh to Elastic ([why](docs/2026-10-20-why-elastic-over-wazuh.md)).
 
