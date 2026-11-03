@@ -116,3 +116,12 @@ Detailed diagrams of the bridge, VLAN tagging and traffic flows: [virtual networ
 - [x] Control node `ctl01` + GitLab CE ([build log](00-build/2026-11-02/log.md))
 - [ ] GitLab Runner, push mirror to GitHub, CI pipeline
 - [ ] DMZ target
+
+## License
+
+| Content | License | In short |
+| --- | --- | --- |
+| Detection rules ([`detections/`](detections/)) | [Detection Rule License 1.1](detections/LICENSE.md) | Use, modify and deploy them freely, commercially too. Keep the author attribution in the rule and in alerts it generates. |
+| Everything else: build logs, write-ups, docs, diagrams | [CC BY 4.0](LICENSE) | Reuse and adapt with credit to Eli ([Elimartes15](https://github.com/Elimartes15)). |
+
+Rules adapted from [SigmaHQ](https://github.com/SigmaHQ/sigma) keep their original authors' attribution through each rule's `related` and `references` fields, as DRL 1.1 requires.
