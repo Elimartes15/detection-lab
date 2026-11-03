@@ -743,5 +743,5 @@ Full write-up: [scenario 001](../../scenarios/001-powershell-encoded-command/REA
 | Issue | Cause | Fix |
 | --- | --- | --- |
 | EQL query returned nothing | It was pasted into Discover, which only runs KQL and Lucene | Tested in the rule's Preview instead |
-| The converted rule couldn't match Security-log events | pySigma's ECS pipeline wrote `process.executable.caseless`, a field that only exists in Elastic Defend data | Replaced with `process.executable`; `like~` already ignores case |
+| Changed a field the rule didn't need changed | Assumed `process.executable.caseless` was missing from Windows integration data. Verified on 2026-11-02 that it exists (6,764 4688 events) | Revision 1 uses `process.executable`, which behaves the same with `like~`. Lesson: check in Discover before changing a rule |
 | Rule searched every data stream | Index patterns included `logs-*` | Narrowed to the Sysmon and Security data streams |

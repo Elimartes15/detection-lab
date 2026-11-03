@@ -1,11 +1,16 @@
 title: PowerShell Launched With an Encoded Command
 id: f2cd0abf-3b43-4eb3-ac71-de6b1817f860
+related:
+    - id: fb843269-508c-4b76-8b8d-88679db22ce7  # SigmaHQ: Suspicious Execution of Powershell with Base64 (frack113)
+      type: derived
 status: experimental
 description: |
     Detects PowerShell started with the -EncodedCommand parameter or one of its
     abbreviations (-e, -en, -enc, -ec). Attackers Base64-encode commands to hide
     them from casual inspection and simple string-matching defenses.
+    Adapted from SigmaHQ's rule fb843269 (flag list); adds windash and OriginalFileName.
 references:
+    - https://github.com/SigmaHQ/sigma/blob/master/rules/windows/process_creation/proc_creation_win_powershell_encode.yml
     - https://attack.mitre.org/techniques/T1059/001/
     - https://attack.mitre.org/techniques/T1027/
 author: Eli
@@ -35,5 +40,6 @@ detection:
             - ' -ec '
     condition: all of selection_*
 falsepositives:
+    - The -Encoding parameter (for example Get-Content -Encoding UTF8) also matches ' -enco'; not filtered yet
     - Administrative or deployment tooling that passes scripts as encoded commands (for example SCCM, Intune or some installers)
 level: medium

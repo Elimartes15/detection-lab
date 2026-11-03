@@ -28,7 +28,7 @@ flowchart LR
 
 - **GitLab is the source of truth.** Every change goes through GitLab, and its CI runner sits inside the lab, next to the SIEM it deploys to.
 - **GitHub is a read-only mirror.** GitLab pushes to it automatically, so this public repo always matches what's actually deployed. Nothing is edited on GitHub.
-- **Validation exists because of a real bug.** In [Scenario 001](scenarios/001-powershell-encoded-command/README.md), the converted rule referenced a field that the lab's data may not contain. The pipeline checks converted queries against real data before deploying them.
+- **Validation exists because of a real mistake.** In [Scenario 001](scenarios/001-powershell-encoded-command/README.md), I edited a converted rule because I assumed one of its fields was missing from my data. It wasn't. The pipeline checks converted queries against real data, so assumptions like that get tested instead of guessed.
 
 ## Hardware
 
