@@ -1,11 +1,27 @@
-stages: [lint]
+stages: [lint, convert]
 
 default:
   tags: [ctl01, shell]
+  before_script:
+    - export PATH="$HOME/.local/bin:$PATH"
 
 sigma-check:
   stage: lint
   script:
-    - export PATH="$HOME/.local/bin:$PATH"
     - sigma version
     - sigma check --fail-on-issues detections/sigma/
+
+sigma-convert:
+  stage: convert
+  script:
+    - mkdir -p converted/eql converted/kql
+    - |
+      for rule in $(find detections/sigma -name '*.yml'); do
+        name=$(basename "$rule" .yml)
+        sigma convert -t eql   -p ecs_windows   -o "converted/eql/$name.eql" "$rule"
+        sigma convert -t kusto -p microsoft_xdr -o "converted/kql/$name.kql" "$rule"
+      done
+    - ls -R converted
+  artifacts:
+    paths: [converted/]
+    expire_in: 30 days
