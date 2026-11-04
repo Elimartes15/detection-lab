@@ -6,4 +6,3 @@ runner-smoke-test:
   script:
     - echo "Runner on $(hostname) as $(whoami)"
     - git --version
-  
