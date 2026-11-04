@@ -1,8 +1,11 @@
-stages: [test]
+stages: [lint]
 
-runner-smoke-test:
-  stage: test
+default:
   tags: [ctl01, shell]
+
+sigma-check:
+  stage: lint
   script:
-    - echo "Runner on $(hostname) as $(whoami)"
-    - git --version
+    - export PATH="$HOME/.local/bin:$PATH"
+    - sigma version
+    - sigma check --fail-on-issues detections/sigma/
