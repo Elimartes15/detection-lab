@@ -1,0 +1,8 @@
+stages: [test]
+
+runner-smoke-test:
+  stage: test
+  tags: [ctl01, shell]
+  script:
+    - echo "Runner on $(hostname) as $(whoami)"
+    - git --version
