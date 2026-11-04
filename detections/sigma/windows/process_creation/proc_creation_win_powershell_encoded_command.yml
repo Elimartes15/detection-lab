@@ -16,6 +16,7 @@ references:
 author: Eli, frack113 (original SigmaHQ rule)
 license: DRL-1.1
 date: 2026-11-01
+modified: 2026-11-04
 tags:
     - attack.execution
     - attack.t1059.001
@@ -39,8 +40,10 @@ detection:
             - ' -enc '
             - ' -enco'
             - ' -ec '
-    condition: all of selection_*
+    filter_main_encoding:
+        CommandLine|contains: ' -Encoding '
+    condition: all of selection_* and not 1 of filter_main_*
 falsepositives:
-    - The -Encoding parameter (for example Get-Content -Encoding UTF8) also matches ' -enco'; not filtered yet
+    - The -Encoding parameter (for example Get-Content -Encoding UTF8) also matches ' -enco'; excluded by filter_main_encoding
     - Administrative or deployment tooling that passes scripts as encoded commands (for example SCCM, Intune or some installers)
 level: medium
