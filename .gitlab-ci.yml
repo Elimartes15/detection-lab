@@ -13,13 +13,17 @@ sigma-check:
 
 sigma-convert:
   stage: convert
+  variables:
+    # Pinned converter venv (DD-029): sigma-cli 3.1.0, pySigma 1.5.1, ES 2.1.1, Kusto 1.0.1
+    SIGMA_CONVERT: /home/gitlab-runner/sigma-convert/bin/sigma
   script:
+    - $SIGMA_CONVERT version
     - mkdir -p converted/eql converted/kql
     - |
       for rule in $(find detections/sigma -name '*.yml'); do
         name=$(basename "$rule" .yml)
-        sigma convert -t eql   -p ecs_windows   -o "converted/eql/$name.eql" "$rule"
-        sigma convert -t kusto -p microsoft_xdr -o "converted/kql/$name.kql" "$rule"
+        $SIGMA_CONVERT convert -t eql   -p ecs_windows   -o "converted/eql/$name.eql" "$rule"
+        $SIGMA_CONVERT convert -t kusto -p microsoft_xdr -o "converted/kql/$name.kql" "$rule"
       done
     - ls -R converted
   artifacts:
