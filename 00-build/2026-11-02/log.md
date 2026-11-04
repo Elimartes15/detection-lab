@@ -774,8 +774,26 @@ Full write-up: [scenario 001](../../scenarios/001-powershell-encoded-command/REA
 - Group `cybereli`, private project `detection-lab`. The full history was pushed from the laptop with a token limited to `read_repository` and `write_repository`, 90-day expiry.
 - The laptop repo now has two remotes: `origin` (GitHub) and `gitlab`.
 
-### Other
+### Scenario 001 corrections
 
+- **Field check:** the alerts without the Analyzer icon were Security 4688 (`system.security`), so revision 0 already matched both sources. Discover found `process.executable.caseless` on 6,764 4688 events in two days. The earlier "missing field" claim was wrong; lesson 1 was rewritten to say so.
+- Write-up corrected: all 4 alerts credited to revision 0, unverified claims removed, Administrator account noted under Gaps.
+- `-Encoding` false positive added to the tuning section.
+- **SigmaHQ credit:** the rule is adapted from SigmaHQ's *Suspicious Execution of Powershell with Base64* (frack113).
+  - The Sigma rule gets `related` (type `derived`), the reference URL, and both authors.
+  - The KQL file gets a credit header.
+  - The rule index gets a Credit column.
+  - In Kibana, frack113 was added to the rule's Author field so alerts carry the credit.
+
+### Repo
+
+- **Licenses:** DRL 1.1 for `detections/`, CC BY 4.0 for everything else, plus a License section in the README.
+- **README:**
+  - Retitled **Detection Engineering Lab**.
+  - New detection-as-code and infrastructure-as-code goals.
+  - A pipeline diagram (GitLab → `sigma check` → convert → validate → deploy, with a GitHub push mirror), marked as not built yet.
+  - Status line brought up to date.
+- **Network diagrams:** `ctl01` on Fa0/20, and a new laptop → GitLab flow.
 - Firewall alias renamed to `Home_LAN` across the docs.
 
 ### Next
@@ -784,7 +802,8 @@ Full write-up: [scenario 001](../../scenarios/001-powershell-encoded-command/REA
 - Install GitLab Runner on `ctl01` and register it.
 - Make GitLab the source of truth: a **push mirror** to GitHub, and the laptop pushes only to GitLab.
 - HTTPS for GitLab (shared lab CA with Fleet), then switch the laptop to a fine-grained token.
-- Finish Scenario 001: re-test rule revision 1, fix the README claims, add licenses and SigmaHQ credit.
+- Add the `-Encoding` filter to the Scenario 001 rule. It's a good first change to push through the pipeline.
+- Re-test with a standard domain user instead of Administrator.
 
 ### Issues and fixes
 

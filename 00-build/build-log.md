@@ -2,7 +2,7 @@
 
 Each day's folder holds a **cumulative** `log.md`: everything from day one up to and including that date. The most recent folder is always the full log. Screenshots and command output for a day sit next to its `log.md`.
 
-**Current full log:** [2026-11-02](2026-11-02/log.md)
+**Current full log:** [2026-11-04](2026-11-04/log.md)
 
 | Date | Focus | Highlights | Issues |
 | --- | --- | --- | --- |
@@ -19,5 +19,6 @@ Each day's folder holds a **cumulative** `log.md`: everything from day one up to
 | [2026-10-31](2026-10-31/log.md) | Audit policy | Static DHCP for WS01/WS02, domain-wide audit + PowerShell logging GPO, 4688 and 4104 verified in Kibana | 3 |
 | [2026-11-01](2026-11-01/log.md) | Scenario 001 | First Sigma rule, EQL + KQL conversions, rule validated (4 alerts), Analyzer process tree, case SCN-001 | 3 |
 | [2026-11-02](2026-11-02/log.md) | GitLab | `ctl01` on mini PC 2 (VLAN 10), GitLab CE 19.5.3 tuned for 8 GB and hardened, `detection-lab` pushed to GitLab | 2 |
+| [2026-11-04](2026-11-04/log.md) | CI runner | Auto DevOps off, GitLab Runner 19.5.2 (instance, shell executor) on `ctl01`, pipeline #1 passed | — |
 
 Design choices and their reasoning live in [design decisions](../docs/design-decisions.md).

@@ -4,6 +4,13 @@ Each decision records what was chosen, the alternatives, and why. Newest first.
 
 ---
 
+## DD-028 · Shell executor for the CI runner (for now)
+
+- **Decision:** GitLab Runner on `ctl01` uses the shell executor, registered as a tagged instance runner that doesn't pick up untagged jobs.
+- **Why:** an 8 GB host already running GitLab can't spare RAM for Docker images per job. The pipeline's tools (`sigma-cli`, `curl` to the Kibana API) run fine natively.
+- **Risk accepted:** jobs run as `gitlab-runner` directly on the host with no isolation, so any committed `.gitlab-ci.yml` can execute code on `ctl01`. Acceptable while the GitLab instance is private, sign-up is off and I'm the only committer.
+- **Revisit:** move to the Docker executor before accepting outside contributions or running untrusted code.
+
 ## DD-027 · Two independent endpoint telemetry sources
 
 - **Decision:** a domain-wide GPO enables the Advanced Audit Policy, command lines in 4688 and PowerShell module and script block logging, alongside Sysmon.
