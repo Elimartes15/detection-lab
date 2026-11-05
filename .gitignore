@@ -18,3 +18,6 @@ Thumbs.db
 
 # raw screenshots; cleaned copies live in evidence/
 scenarios/*/Pictures*/
+
+# CI build output (sigma-convert job artifacts)
+converted/
