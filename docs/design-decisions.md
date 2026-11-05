@@ -4,6 +4,13 @@ Each decision records what was chosen, the alternatives, and why. Newest first.
 
 ---
 
+## DD-029 · Pinned toolchain per CI job
+
+- **Decision:** lint and conversion use separate, pinned toolchains on `ctl01`. Lint: sigma-cli 4.0 (pySigma 2.x, current ATT&CK data). Conversion: a venv pinned to sigma-cli 3.1.0, pySigma 1.5.1, `pysigma-backend-elasticsearch` 2.1.1, `pysigma-backend-kusto` 1.0.1.
+- **Why:** the backends don't support pySigma 2.x yet. Forcing them in risks a conversion that runs cleanly but emits a subtly wrong query, the worst failure for a detection pipeline. Pinning means a dependency update can never silently change deployed queries.
+- **Rejected:** `sigma plugin install --force-install`; a single toolchain on pySigma 1.x (lint would lose ATT&CK v19 validation).
+- **Revisit:** move conversion to pySigma 2.x once both backends support it; diff the converted output before and after.
+
 ## DD-028 · Shell executor for the CI runner (for now)
 
 - **Decision:** GitLab Runner on `ctl01` uses the shell executor, registered as a tagged instance runner that doesn't pick up untagged jobs.

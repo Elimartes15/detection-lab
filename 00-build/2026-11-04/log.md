@@ -815,7 +815,7 @@ Full write-up: [scenario 001](../../scenarios/001-powershell-encoded-command/REA
 
 ---
 
-## 2026-11-04 · GitLab Runner and the first pipeline
+## 2026-11-04 · CI runner, detection-as-code pipeline, Scenario 001 rev 2
 
 ### Auto DevOps off
 
@@ -840,14 +840,81 @@ Full write-up: [scenario 001](../../scenarios/001-powershell-encoded-command/REA
 
 ![Job #1 log](02-job-1-log.png)
 
+### Repo housekeeping
+
+- GitHub push failed with *This repository moved* plus a 500: the `origin` URL used `elimartes15` (lowercase). Set to the exact `https://github.com/Elimartes15/detection-lab.git` and the push went through.
+- From now on, experiments go on a branch, not `main`.
+
+### Push mirror: GitLab → GitHub
+
+- GitHub fine-grained token scoped to `detection-lab` only, **Contents: read/write**, 90-day expiry.
+- GitLab push mirror to `https://github.com/Elimartes15/detection-lab.git`, **Mirror only protected branches**: only `main` reaches GitHub; working branches stay private.
+- Verified with a commit pushed to GitLab only (`94b7816`, trailing-whitespace fix), which appeared on GitHub through the mirror.
+- Laptop `origin` set to fetch-only (`git remote set-url --push origin DISABLED`). The laptop can no longer push to GitHub, enforcing DD-025 locally.
+
+![Push mirror](03-push-mirror.png)
+
+### Pipeline: lint → convert
+
+```
+push ─▶ sigma-check (lint) ─▶ sigma-convert ─▶ converted/ artifacts
+```
+
+- **`sigma-check`:** `sigma check --fail-on-issues detections/sigma/` with sigma-cli 4.0.0 (pipx, `gitlab-runner`'s home). Warnings fail the job, not just errors.
+- **`sigma-convert`:** loops over every rule in `detections/sigma/` and writes EQL (`ecs_windows`) and KQL (`microsoft_xdr`) as job artifacts, kept 30 days. Runs only if lint passes.
+- **Two pinned toolchains** (DD-029): lint on sigma-cli 4.0 / pySigma 2.x; conversion in a separate venv pinned to sigma-cli 3.1.0, pySigma 1.5.1, `pysigma-backend-elasticsearch` 2.1.1, `pysigma-backend-kusto` 1.0.1.
+- `before_script` in `default` sets PATH once for every job.
+- `converted/` added to `.gitignore`: build output is never committed.
+
+### First real change through the pipeline: Scenario 001 rev 2
+
+- Branch `scn001-encoding-filter`:
+  - `filter_main_encoding` (`CommandLine|contains: ' -Encoding '`), condition `all of selection_* and not 1 of filter_main_*`, `modified: 2026-11-04`.
+  - `.gitlab-ci.yml` smoke test replaced by the lint gate.
+- **Lint failed on the first run**, for a reason no one could have seen by reading the rule: ATT&CK v19 (April 2026) split Defense Evasion into **Stealth** (keeps TA0005) and Impair Defenses, and pySigma 4.0 validates against v19. `attack.defense-evasion` → `attack.stealth`. Second run passed: 0 errors, 0 condition errors, 0 issues.
+- Merged by **merge request** (`c46f86a0`); pipeline #8 passed on `main`; the mirror carried it to GitHub.
+- Branch `scn001-conversions`: added the convert stage; EQL and KQL for rev 2 taken from the job artifacts into `detections/elastic/` and `detections/kql/`, merged by MR (`4e1bbca`). The converter emits `process.executable.caseless`; both forms work on this data (lesson 1 of Scenario 001).
+- Kibana rule updated by hand with the repo's EQL (rule revision 2). Deployment from the pipeline is the next stage.
+
+![Lint fails on the ATT&CK v19 tag](04-lint-fail-attack-v19.png)
+
+![Lint passes](05-lint-pass.png)
+
+![Merge request merged, pipeline passed on main](06-mr-merged.png)
+
+![Convert artifacts](07-convert-artifacts.png)
+
+### Rev 2 validation on `ws02` (as `administrator`)
+
+| # | Test | Expected | Result |
+| --- | --- | --- | --- |
+| 1 | `powershell.exe -NoProfile -enc $b64` | Alert | ✅ 2 alerts (Sysmon + 4688), 20:18 |
+| 2 | `powershell.exe -NoProfile -Command "Get-Content C:\Windows\win.ini -Encoding UTF8 \| Out-Null"` | No alert | ✅ No alert: false positive removed |
+| 3 | `powershell.exe -NoProfile -enc $b64 -Encoding x` | Bypass? | ✅ Not a bypass: PowerShell refuses (*a command is already specified with -Command or -EncodedCommand*); payload never runs |
+| 4 | `powershell.exe -NoProfile -WorkingDirectory "C:\Temp\x -Encoding y" -enc $b64` | Bypass? | ❌ **Bypass.** Payload ran (`scenario-001`, `cybereli\administrator`), **no alert** |
+
+![Rev 2 test 1 alerts](08-rev2-test1-alerts.png)
+
+**Finding:** the `-Encoding` exclusion matches anywhere in the command line, which the attacker controls. Putting ` -Encoding ` inside any valid parameter value, here a folder name passed to `-WorkingDirectory`, silences the rule. SigmaHQ's upstream rule uses the same exclusion.
+
+**Fix (rev 3):** remove the filter and make the match precise instead. Every abbreviation of `-EncodedCommand` from `-enco` on is `-enco`, `-encod` or `-encode…`; `-Encoding` starts with `-encodi`, which none of them match. Replace ` -enco` with ` -enco `, ` -encod `, ` -encode`, then re-run all four tests.
+
 ### Next
 
-- **Push mirror** GitLab → GitHub; the laptop stops pushing to `origin`.
-- First real CI stage: `sigma check` on `detections/sigma/`.
-- Add the `-Encoding` filter to the Scenario 001 rule and ship it through the pipeline.
+- **Rev 3:** precise flag list, no command-line exclusion; re-run tests 1–4. Consider reporting the bypass upstream to SigmaHQ.
+- Confirm **Pipelines must succeed** is enabled on merge requests.
+- **Deploy stage:** push converted rules to Kibana through the Detection Engine API, so no rule is pasted by hand.
+- **Drift check:** fail the pipeline if committed EQL/KQL differ from what the convert stage generates.
 - HTTPS for GitLab (shared lab CA with Fleet), then a fine-grained token on the laptop.
-- Re-test Scenario 001 with a standard domain user; add Directory Service Changes (5136) to the audit GPO.
+- Re-test as a standard domain user; add Directory Service Changes (5136) to the audit GPO.
 
 ### Issues and fixes
 
-None.
+| Issue | Cause | Fix |
+| --- | --- | --- |
+| GitHub push: *repository moved* + Internal Server Error | `origin` URL case (`elimartes15`) differed from the account (`Elimartes15`); pushes through the redirect failed | `git remote set-url origin` with the exact URL |
+| Lint: `InvalidATTACKTagIssue` on `attack.defense-evasion` | ATT&CK v19 split Defense Evasion; pySigma 4.0 validates against v19 | Tag changed to `attack.stealth` |
+| `sigma plugin install`: *Plugin not compatible with installed pySigma version* | Elasticsearch and Kusto backends don't support pySigma 2.x yet | Separate pinned venv for conversion (DD-029); `--force-install` rejected |
+| Convert job: *'eql' is not one of .* | `.gitlab-ci.yml` still called the unpinned `sigma` (no backends) | Job calls the pinned venv by full path |
+| KQL credit header lost | Artifact file copied over the committed file | Header restored; the deploy stage will generate files with headers |
+| `sigma` not recognized in PowerShell | sigma-cli is only on `ctl01` | Conversion moved into the pipeline instead of installing it on the laptop |
