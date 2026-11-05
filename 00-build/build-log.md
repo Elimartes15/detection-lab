@@ -19,6 +19,6 @@ Each day's folder holds a **cumulative** `log.md`: everything from day one up to
 | [2026-10-31](2026-10-31/log.md) | Audit policy | Static DHCP for WS01/WS02, domain-wide audit + PowerShell logging GPO, 4688 and 4104 verified in Kibana | 3 |
 | [2026-11-01](2026-11-01/log.md) | Scenario 001 | First Sigma rule, EQL + KQL conversions, rule validated (4 alerts), Analyzer process tree, case SCN-001 | 3 |
 | [2026-11-02](2026-11-02/log.md) | GitLab | `ctl01` on mini PC 2 (VLAN 10), GitLab CE 19.5.3 tuned for 8 GB and hardened, `detection-lab` pushed to GitLab | 2 |
-| [2026-11-04](2026-11-04/log.md) | CI runner | Auto DevOps off, GitLab Runner 19.5.2 (instance, shell executor) on `ctl01`, pipeline #1 passed | — |
+| [2026-11-04](2026-11-04/log.md) | CI/CD + Scenario 001 rev 2 | Runner on `ctl01`, push mirror to GitHub, lint → convert pipeline, first MR-merged rule change, `-Encoding` exclusion bypass found | 6 |
 
 Design choices and their reasoning live in [design decisions](../docs/design-decisions.md).

@@ -92,8 +92,23 @@ The alerts were attached to a case with the decoded command in its description, 
 - **Duplicate alerts:** each execution alerts twice, once per source. Kept deliberately: if an attacker unloads the Sysmon driver, the Security-log alert still fires. Elastic's alert suppression could merge them; not tested yet.
 - **Only Sysmon alerts open in the Analyzer.** 4688 events carry no process GUIDs. Sysmon provides context; 4688 provides resilience.
 - **Likely false positives:** management and deployment tools that pass scripts as encoded commands (SCCM, Intune, some installers). None seen in the lab yet; in production, baseline for a week and add exceptions by parent process and signer, not by command line.
-- **Known false positives my rule doesn't filter yet:** ` -enco` also matches the unrelated `-Encoding` parameter (for example `Get-Content log.txt -Encoding UTF8`). SigmaHQ's rule excludes ` -Encoding ` and the Azure guest-configuration agent; mine should too.
+- **`-Encoding` false positive:** ` -enco` also matches the unrelated `-Encoding` parameter (for example `Get-Content log.txt -Encoding UTF8`). Revision 2 excluded it the way SigmaHQ does, and that exclusion turned out to be a bypass. See [Revision 2](#revision-2-the-filter-that-opened-a-hole).
 - **Inconsistent user names across sources:** the same account appears as `administrator` in one source and `Administrator` in the other, so the case counted 2 associated users for 1 account. Queries and correlations on `user.name` should be case-insensitive.
+
+## Revision 2: the filter that opened a hole
+
+Revision 2 (2026-11-04) added SigmaHQ's exclusion, `CommandLine|contains: ' -Encoding '`, and was the first change shipped through the [detection-as-code pipeline](../../README.md#detection-as-code-pipeline): branch, `sigma check`, automatic EQL/KQL conversion, merge request. Tested on `ws02`:
+
+| # | Command | Expected | Result |
+| --- | --- | --- | --- |
+| 1 | `powershell.exe -NoProfile -enc $b64` | Alert | ✅ Alerted (Sysmon + 4688) |
+| 2 | `powershell.exe -NoProfile -Command "Get-Content C:\Windows\win.ini -Encoding UTF8 \| Out-Null"` | No alert | ✅ No alert |
+| 3 | `powershell.exe -NoProfile -enc $b64 -Encoding x` | Bypass? | ✅ Not a bypass: PowerShell rejects trailing text after `-EncodedCommand` |
+| 4 | `powershell.exe -NoProfile -WorkingDirectory "C:\Temp\x -Encoding y" -enc $b64` | Bypass? | ❌ **Bypass:** payload ran, no alert |
+
+**The exclusion matches a string the attacker controls.** Any valid parameter value containing ` -Encoding `, here a folder name, silences the rule. Test 3 alone would have suggested the filter was safe; the bypass needed a *valid* parameter to carry the string.
+
+**Revision 3 plan:** remove the exclusion and make the match precise. Every abbreviation of `-EncodedCommand` from `-enco` on is `-enco`, `-encod` or `-encode…`, while `-Encoding` starts with `-encodi`. Matching ` -enco `, ` -encod ` and ` -encode` instead of ` -enco` removes the false positive without leaving an attacker-controlled exclusion.
 
 ## Gaps
 
@@ -103,6 +118,7 @@ The alerts were attached to a case with the decoded command in its description, 
 | Renamed `powershell.exe` | Sysmon: yes (`OriginalFileName`). 4688: no | Accept; Sysmon covers it |
 | PowerShell hosted inside another program (no `powershell.exe` at all) | No | **A 4104-based rule**: script block logging records the code regardless of the host process |
 | Payload passed another way (download cradle, `-Command` with obfuscation) | No | Separate rules for obfuscation patterns in 4104 |
+| ` -Encoding ` planted in another parameter value (rev 2) | **No** (bypass confirmed) | Rev 3: precise flag list, no exclusion |
 
 **Not yet tested:** the emulation ran as the built-in domain Administrator on a workstation, which no real environment should allow. A run as a standard domain user is still pending; a workstation admin model (LAPS) is on the roadmap.
 

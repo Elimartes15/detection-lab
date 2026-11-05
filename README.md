@@ -2,7 +2,7 @@
 
 A segmented, Microsoft-style business network built on a single node Proxmox hypervisor, used to emulate attacks, collect telemetry in Elastic Security, and build detections as code (Sigma, Elastic rules,CI/CD).
 
-**Status:** 🟡 Build phase. Network, firewall, Active Directory, Elastic SIEM with Windows telemetry, and the first detection (Scenario 001) are done. GitLab and its CI runner run on the control node; the first pipeline passed. Next: GitHub push mirror and the detection-as-code pipeline stages. SIEM switched from Wazuh to Elastic ([why](docs/2026-10-20-why-elastic-over-wazuh.md)).
+**Status:** 🟡 Build phase. Network, firewall, Active Directory, Elastic SIEM with Windows telemetry, and the first detection (Scenario 001) are done. The detection-as-code pipeline lints and converts every rule, GitLab mirrors `main` to GitHub, and Scenario 001 revision 2 shipped through it (and revealed a bypass). Next: revision 3 and a deploy stage to Kibana. SIEM switched from Wazuh to Elastic ([why](docs/2026-10-20-why-elastic-over-wazuh.md)).
 
 ## Goals
 
@@ -14,7 +14,7 @@ A segmented, Microsoft-style business network built on a single node Proxmox hyp
 
 ## Detection-as-code pipeline
 
-🚧 GitLab and its runner are running (pipeline #1 passed). The pipeline stages are the next build steps.
+🚧 Built: `sigma check` lint gate → automatic EQL/KQL conversion → GitHub push mirror. Not built yet: validate and deploy to Kibana.
 
 ```mermaid
 flowchart LR
@@ -115,7 +115,8 @@ Detailed diagrams of the bridge, VLAN tagging and traffic flows: [virtual networ
 - [x] Kali on mini PC 1, attacker zone verified
 - [x] Control node `ctl01` + GitLab CE ([build log](00-build/2026-11-02/log.md))
 - [x] GitLab Runner on `ctl01`, first pipeline passed ([build log](00-build/2026-11-04/log.md))
-- [ ] Push mirror to GitHub, detection-as-code pipeline stages
+- [x] Push mirror to GitHub; lint and convert stages ([build log](00-build/2026-11-04/log.md))
+- [ ] Deploy stage to Kibana, drift check
 - [ ] DMZ target
 
 ## License
