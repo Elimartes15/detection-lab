@@ -16,7 +16,7 @@ references:
 author: Eli, frack113 (original SigmaHQ rule)
 license: DRL-1.1
 date: 2026-11-01
-modified: 2026-11-04
+modified: 2026-11-07
 tags:
     - attack.execution
     - attack.t1059.001
@@ -38,12 +38,12 @@ detection:
             - ' -e '
             - ' -en '
             - ' -enc '
-            - ' -enco'
+            - ' -enco '
+            - ' -encod '
+            - ' -encode'
             - ' -ec '
-    filter_main_encoding:
-        CommandLine|contains: ' -Encoding '
-    condition: all of selection_* and not 1 of filter_main_*
+    condition: all of selection_*
 falsepositives:
-    - The -Encoding parameter (for example Get-Content -Encoding UTF8) also matches ' -enco'; excluded by filter_main_encoding
+    - None from -Encoding; the flag list stops at '-encode', which '-Encoding' (-encodi...) never matches. No command-line exclusion (see Scenario 001 rev 2 bypass)
     - Administrative or deployment tooling that passes scripts as encoded commands (for example SCCM, Intune or some installers)
 level: medium
