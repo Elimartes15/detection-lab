@@ -110,6 +110,23 @@ Revision 2 (2026-11-04) added SigmaHQ's exclusion, `CommandLine|contains: ' -Enc
 
 **Revision 3 plan:** remove the exclusion and make the match precise. Every abbreviation of `-EncodedCommand` from `-enco` on is `-enco`, `-encod` or `-encode…`, while `-Encoding` starts with `-encodi`. Matching ` -enco `, ` -encod ` and ` -encode` instead of ` -enco` removes the false positive without leaving an attacker-controlled exclusion.
 
+## Revision 3: precise match, no exclusion
+
+Revision 3 (2026-11-07) removes the exclusion and fixes the false positive where it starts: ` -enco` became ` -enco `, ` -encod ` and ` -encode`. Every abbreviation of `-EncodedCommand` from `-enco` on still matches; `-Encoding` (`-encodi…`) no longer does. Nothing in the rule depends on text an attacker could add.
+
+**Validated by backtest:** the rev 3 query was previewed over the same Nov 1–4 telemetry.
+
+| Event | Rev 2 | Rev 3 |
+| --- | --- | --- |
+| Emulation runs, Nov 1 (4) and test 1 | ✅ | ✅ |
+| Test 2, `Get-Content -Encoding UTF8` | ✅ silent | ✅ silent |
+| Test 3, `-enc <b64> -Encoding x` (payload refused) | silent | ✅ alert: an attempted encoded command is still worth seeing |
+| Test 4, `-WorkingDirectory "C:\Temp\x -Encoding y"` | ❌ missed | ✅ **caught** |
+
+Backtesting proves the fix against the exact event that got through, not a fresh re-run that might differ.
+
+**Lesson:** an exclusion is a statement of trust. Never exclude on a field the attacker writes if you can make the match itself precise.
+
 ## Gaps
 
 | Evasion | Covered? | Next step |
@@ -118,7 +135,7 @@ Revision 2 (2026-11-04) added SigmaHQ's exclusion, `CommandLine|contains: ' -Enc
 | Renamed `powershell.exe` | Sysmon: yes (`OriginalFileName`). 4688: no | Accept; Sysmon covers it |
 | PowerShell hosted inside another program (no `powershell.exe` at all) | No | **A 4104-based rule**: script block logging records the code regardless of the host process |
 | Payload passed another way (download cradle, `-Command` with obfuscation) | No | Separate rules for obfuscation patterns in 4104 |
-| ` -Encoding ` planted in another parameter value (rev 2) | **No** (bypass confirmed) | Rev 3: precise flag list, no exclusion |
+| ` -Encoding ` planted in another parameter value | Rev 2: no (bypass). **Rev 3: yes** | — |
 
 **Not yet tested:** the emulation ran as the built-in domain Administrator on a workstation, which no real environment should allow. A run as a standard domain user is still pending; a workstation admin model (LAPS) is on the roadmap.
 

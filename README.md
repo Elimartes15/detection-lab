@@ -2,7 +2,7 @@
 
 A segmented, Microsoft-style business network built on a single node Proxmox hypervisor, used to emulate attacks, collect telemetry in Elastic Security, and build detections as code (Sigma, Elastic rules,CI/CD).
 
-**Status:** 🟡 Build phase. Network, firewall, Active Directory, Elastic SIEM with Windows telemetry, and the first detection (Scenario 001) are done. The detection-as-code pipeline lints and converts every rule, GitLab mirrors `main` to GitHub, and Scenario 001 revision 2 shipped through it (and revealed a bypass). Next: revision 3 and a deploy stage to Kibana. SIEM switched from Wazuh to Elastic ([why](docs/2026-10-20-why-elastic-over-wazuh.md)).
+**Status:** 🟡 Build phase. Network, firewall, Active Directory, Elastic SIEM with Windows telemetry, and the first detection (Scenario 001) are done. The detection-as-code pipeline lints and converts every rule, GitLab mirrors `main` to GitHub, and Scenario 001 went through it twice: revision 2 revealed a bypass in the common `-Encoding` exclusion, revision 3 closed it without any exclusion. Next: a deploy stage to Kibana. SIEM switched from Wazuh to Elastic ([why](docs/2026-10-20-why-elastic-over-wazuh.md)).
 
 ## Goals
 
