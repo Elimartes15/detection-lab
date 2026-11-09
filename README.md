@@ -1,8 +1,8 @@
 # Detection Engineering Lab
 
-A segmented, Microsoft-style business network built on a single node Proxmox hypervisor, used to emulate attacks, collect telemetry in Elastic Security, and build detections as code (Sigma, Elastic rules,CI/CD).
+A segmented, Microsoft-style business network built on a single node Proxmox hypervisor, used to emulate attacks, collect telemetry in Elastic Security, and build detections as code (Sigma, Elastic rules, CI/CD).
 
-**Status:** 🟡 Build phase. Network, firewall, Active Directory, Elastic SIEM with Windows telemetry, and the first detection (Scenario 001) are done. The detection-as-code pipeline lints and converts every rule, GitLab mirrors `main` to GitHub, and Scenario 001 went through it twice: revision 2 revealed a bypass in the common `-Encoding` exclusion, revision 3 closed it without any exclusion. Rules now deploy to Kibana from the pipeline. SIEM switched from Wazuh to Elastic ([why](docs/2026-10-20-why-elastic-over-wazuh.md)).
+**Status:** 🟡 Build phase. Network, firewall, Active Directory, Elastic SIEM with Windows telemetry, and the first detection (Scenario 001) are done. The detection-as-code pipeline lints, converts and deploys every rule to Kibana, GitLab mirrors `main` to GitHub, and Scenario 001 went through it twice: revision 2 revealed a bypass in the common `-Encoding` exclusion, revision 3 closed it without any exclusion. SIEM switched from Wazuh to Elastic ([why](docs/2026-10-20-why-elastic-over-wazuh.md)).
 
 ## Goals
 
@@ -21,14 +21,15 @@ flowchart LR
     DEV["Sigma rule<br/>written on the laptop"] -->|git push| GL["GitLab CE<br/>ctl01 · source of truth"]
     GL --> LINT["sigma check<br/>syntax + style"]
     LINT --> CONV["sigma convert<br/>EQL for Elastic · KQL for Defender"]
-    CONV --> VAL["Validate<br/>fields exist in real data"]
-    VAL -->|main branch only| DEP["Deploy<br/>Elastic detection rules API"]
+    CONV -->|main branch only| DEP["Deploy<br/>Elastic detection rules API"]
+    CONV -.->|planned| VAL["Validate<br/>fields exist in real data"]
     GL -.->|push mirror| GH["GitHub<br/>public showcase"]
 ```
 
 - **GitLab is the source of truth.** Every change goes through GitLab, and its CI runner sits inside the lab, next to the SIEM it deploys to.
-- **GitHub is a read-only mirror.** GitLab pushes to it automatically, so this public repo always matches what's actually deployed. Nothing is edited on GitHub.
-- **Validation exists because of a real mistake.** In [Scenario 001](scenarios/001-powershell-encoded-command/README.md), I edited a converted rule because I assumed one of its fields was missing from my data. It wasn't. The pipeline checks converted queries against real data, so assumptions like that get tested instead of guessed.
+- **GitHub is a read-only mirror.** GitLab pushes to it automatically, so this public repo always matches what's deployed: every rule in Kibana traces back to a commit here. Nothing is edited on GitHub.
+- **Rules deploy only from `main`,** as a least-privilege `ci-deployer` identity whose API key only `main` pipelines can read. Branches get a dry-run plan instead ([DD-030](docs/design-decisions.md)).
+- **Validation (planned) comes from a real mistake.** In [Scenario 001](scenarios/001-powershell-encoded-command/README.md), I edited a converted rule because I assumed one of its fields was missing from my data. It wasn't. A validation stage will check converted queries against real data, so assumptions like that get tested instead of guessed.
 
 ## Hardware
 
@@ -36,7 +37,7 @@ flowchart LR
 | --- | --- | --- |
 | Dell G5 5000 | i5-10400F (6c/12t), 32 GB RAM, 2 x ~476 GB SSD | Proxmox VE hypervisor |
 | Lenovo ThinkCentre (mini PC 1) | i3-4130T, 8 GB RAM | Kali Linux attacker (bare metal) |
-| Lenovo ThinkCentre (mini PC 2) | i3-4130T, 8 GB RAM | Control node `ctl01`: GitLab CE (running), CI runner, Terraform + Ansible (planned) |
+| Lenovo ThinkCentre (mini PC 2) | i3-4130T, 8 GB RAM | Control node `ctl01`: GitLab CE and its CI runner (running); Terraform + Ansible (planned) |
 | Cisco WS-C2950G-24-EI | 24 x 100 Mbps, 2 x GBIC slots (1000BASE-SX installed) | Core switch, 802.1Q trunk |
 
 ## Architecture
@@ -76,18 +77,19 @@ Detailed diagrams of the bridge, VLAN tagging and traffic flows: [virtual networ
 
 ```
 ├── README.md
-├── .gitlab-ci.yml            detection-as-code pipeline (planned)
+├── .gitlab-ci.yml            detection-as-code pipeline: lint → convert → deploy
 ├── 00-build/                 hypervisor install, storage, ISO hashes, build log
 ├── 01-network/               switch config, OPNsense, firewall rules + rationale
-├── 02-active-directory/      domain build, GPOs, intentional misconfigurations
-├── 03-logging/               Sysmon, audit policy, Elastic Agent + Fleet policies
+├── 02-active-directory/      domain build, GPOs, intentional misconfigurations (planned)
+├── 03-logging/               Sysmon, audit policy, Elastic Agent + Fleet policies (planned)
+├── ci/                       pipeline scripts (deploy_kibana.py: Sigma → Kibana rule upsert)
 ├── detections/
 │   ├── sigma/                source of truth
-│   ├── elastic/              generated Elastic detection rules
+│   ├── elastic/              EQL queries generated from Sigma (reference copy)
 │   ├── kql/                  generated from Sigma
-│   └── yara/
+│   └── yara/                 (planned)
 ├── scenarios/                one folder per attack → detect write-up
-├── coverage/                 ATT&CK Navigator layer
+├── coverage/                 ATT&CK Navigator layer (planned)
 ├── infra/                    Terraform (Proxmox VMs) + Ansible (configuration) (planned)
 └── docs/                     design decisions
 ```
