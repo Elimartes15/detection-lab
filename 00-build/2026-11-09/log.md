@@ -1,0 +1,1042 @@
+# Build Log · through 2026-11-09
+
+[Build log index](../build-log.md) · [← 2026-11-07](../2026-11-07/log.md)
+
+Cumulative log: every day from 2026-10-17 up to and including 2026-11-09. Newest day last.
+
+---
+
+## 2026-10-17 · Planning
+
+### Planning
+
+- Designed the lab architecture: single Proxmox hypervisor (Dell G5), OPNsense as the only router between six lab VLANs, Wazuh and Kali on dedicated mini PCs, and the old Cisco 2950 as the core switch.
+- Sized the hypervisor against its 32 GB RAM limit. Moving Wazuh and Kali off the G5 frees about 12 GB, so every lab VM can run at once (16 GB of VMs plus host overhead).
+- Chose OS versions and sources.
+
+---
+
+## 2026-10-19 · Wazuh and Proxmox
+
+### Wazuh on mini PC 1
+
+> **Superseded on 2026-10-20:** Wazuh was replaced by Elastic Security. Kept here as a record of the evaluation. See [why Elastic over Wazuh](../../docs/2026-10-20-why-elastic-over-wazuh.md).
+
+**OS install**
+
+- Ubuntu Server LTS, **standard install** (not minimized). Minimized strips editors and troubleshooting tools I'd reinstall while debugging, and saves only about 100 MB of RAM.
+- OpenSSH server enabled during install, so the box is managed over SSH.
+- Network: DHCP on the home LAN, planned to move to `10.10.60.10` on VLAN 60.
+- Disk: `<disk size>`, LVM, root logical volume `<expanded to full disk: yes/no>`.
+- Fully updated after install:
+
+```bash
+sudo apt update && sudo apt full-upgrade -y
+sudo reboot
+```
+
+**Wazuh install**
+
+- Wazuh `4.14`, all-in-one (manager, indexer, dashboard) using the official quickstart installation assistant.
+- Admin password saved to my password manager.
+- No agents were enrolled.
+
+**Indexer JVM heap: 2 GB**
+
+The default guidance is half of RAM, but that assumes the indexer has the machine to itself. On an 8 GB all-in-one, the RAM is shared:
+
+| Component | RAM |
+| --- | --- |
+| Ubuntu | ~0.5 GB |
+| Wazuh manager | ~0.5–1 GB |
+| Dashboard | ~0.5–1 GB |
+| Indexer heap | 2 GB |
+| OS file cache (used by the indexer for search) | ~3–4 GB |
+
+1 GB risks circuit-breaker errors once all agents are reporting; 4 GB would starve the manager and dashboard. Set in `/etc/wazuh-indexer/jvm.options`:
+
+```
+-Xms2g
+-Xmx2g
+```
+
+**Proxmox installer USB**
+
+- Reused the Ubuntu USB. Rufus overwrites the whole drive, so no manual wipe was needed.
+- Proxmox VE `9.2.2` ISO from proxmox.com. SHA256 `4e88fe416df9b527624a175f24c9aa07c714d3332afb1ee3dbf3879573ef2c6c` matched the published value.
+- Rufus settings: GPT, UEFI, **DD Image mode**. The Proxmox installer doesn't boot reliably from Rufus's default ISO mode.
+- Dismissed Windows' "You need to format the disk" prompt after writing.
+
+### Proxmox VE on the Dell G5
+
+**BIOS (F2)**
+
+- Storage mode set to **AHCI**. Dell ships in RAID/Intel RST mode, which hides the SSDs from the Linux installer.
+- **Intel Virtualization Technology (VT-x)** and **VT for Direct I/O (VT-d)** enabled.
+- Booted the USB from the F12 one-time boot menu.
+
+**Install**
+
+- Proxmox VE `<version>`, graphical installer.
+- Target: disk 1, **ext4**. Disk 2 is left for a separate LVM-thin pool for lab VMs.
+- Hostname `pve01.lab.local`.
+- Management IP: static `10.0.0.90/24`, set manually in place of the DHCP address the installer pre-filled.
+- Installer USB removed after the install and kept as a rescue disk.
+
+**First-boot issue**
+
+- The console showed repeated `EXT4-fs error ... Detected aborted journal`, and the console login then hung.
+- Meaning: the kernel hit write errors, set the root filesystem read-only, then lost access to the disk.
+- A hard reboot came back clean.
+- Suspected cause: NVMe power-state (APST) dropout, a known Linux issue on some SSDs. A failing or loosely seated drive hasn't been ruled out yet.
+
+Follow-up checks:
+
+```bash
+mount | grep " / "                                          # root must be rw
+dmesg | grep -iE "ext4|nvme|ata|i/o error|reset|timeout"    # no errors this boot
+lsblk -o NAME,SIZE,MODEL,TRAN,MOUNTPOINT                    # confirm NVMe vs SATA
+smartctl -a /dev/nvme0                                      # Critical Warning 0x00, Media Errors 0
+```
+
+If NVMe, disable deep power states in `/etc/default/grub`, then run `update-grub` and reboot:
+
+```
+GRUB_CMDLINE_LINUX_DEFAULT="quiet nvme_core.default_ps_max_latency_us=0 pcie_aspm=off"
+```
+
+Result: everything showed normal after reboot.
+
+### Issues and fixes
+
+| Issue | Cause | Fix |
+| --- | --- | --- |
+| `EXT4-fs error: Detected aborted journal` on first boot; root went read-only and console login hung | Suspected NVMe APST power-state dropout | Hard reboot |
+
+---
+
+## 2026-10-20 · SIEM decision
+
+### SIEM decision: Elastic Security replaces Wazuh
+
+**What changed**
+
+| Area | Before | Now |
+| --- | --- | --- |
+| SIEM | Wazuh all-in-one on mini PC 1 | Elasticsearch + Kibana + Fleet Server, VM on the G5, VLAN 60, 10 GB RAM |
+| Endpoint agent | Wazuh agent | Elastic Agent (Windows, Sysmon, PowerShell integrations; Elastic Defend optional) |
+| Network logs | Syslog to Wazuh | Elastic Agent OPNsense and Cisco integrations |
+| Sigma | Hand-translated to Wazuh XML | `sigma convert` with the Elasticsearch backend → Kibana detection rules via CI |
+| YARA | Wazuh FIM + active response | Rules CI-tested in the repo; scheduled scan writes matches to the event log, Elastic Agent ships them |
+| Mini PC 1 | Wazuh host | Freed: second DMZ Linux target or spare |
+
+**Why:** there is no official Sigma backend for Wazuh's rule format, so every detection would have been translated by hand. Elastic has a maintained pySigma backend, a free Basic tier with a full detection engine, and a free EDR. Full reasoning in [why Elastic over Wazuh](../../docs/2026-10-20-why-elastic-over-wazuh.md).
+
+**Alternatives evaluated:** OpenSearch Security Analytics (runner-up), Security Onion, Splunk Free, Graylog Open, LimaCharlie, Grafana Loki.
+
+**G5 RAM budget after the change**
+
+| VM | RAM |
+| --- | --- |
+| OPNsense | 2 GB |
+| DC01 | 4 GB |
+| WS01 | 4 GB |
+| WS02 | 4 GB |
+| Ubuntu DMZ web | 2 GB |
+| Elastic SIEM | 10 GB |
+| **Total** | **26 GB** |
+| Headroom for Proxmox host (of 32 GB) | 6 GB |
+
+**Next**
+
+- No-subscription repo and updates, wipe disk 2 and create the `vm-lab` LVM-thin pool, ISO downloads (add Ubuntu Server for the Elastic VM).
+- switch config and VLAN-aware bridge, moving management to VLAN 100 in staged steps.
+- Mini PC 1: reimage once its new role is decided.
+
+---
+
+## 2026-10-21 · Network build
+
+### Disk health, storage, switch, OPNsense, DHCP
+
+**Home network reference**
+
+| Item | Value |
+| --- | --- |
+| Home subnet | `10.0.0.0/24` |
+| Home router | `10.0.0.1` |
+| Router DHCP range | `10.0.0.2–10.0.0.80` |
+| Proxmox management (`pve01`) | `10.0.0.90`, static |
+| OPNsense WAN | `10.0.0.91`, static (also reserved on the router) |
+
+**Disk health** (`smartctl -a`, `dmesg`)
+
+| Disk | Role | Result |
+| --- | --- | --- |
+| Samsung PM991a 512 GB NVMe | Proxmox OS + `local-lvm` | SMART PASSED; critical warning `0x00`; 0 media/integrity errors; 7% used; 6,775 power-on hours |
+| Toshiba KSG60ZSE 512 GB SATA SSD | `vm-lab` pool | SMART PASSED; 0 reallocated, 0 uncorrectable, 0 CRC errors; 16% wear; 24,589 power-on hours |
+
+- No new ext4 or I/O errors in `dmesg`. The `orphan cleanup on readonly fs` line at boot is the recovery from Monday's hard reboot.
+- The Toshiba's SMART log holds 3 old ATA errors (aborted feature commands during boot-time identification, the last at 24,061 hours). Benign, nothing current.
+- The OS disk is the NVMe, and it exposes deep power states (PS3/PS4) with up to 9 ms exit latency. That fits the APST explanation for Monday's error.
+
+**Storage**
+
+- `sda` (Toshiba) wiped of its old Windows partitions and created as the LVM-thin pool `vm-lab` for lab VMs and containers.
+
+**Switch (Cisco WS-C2950G-24-EI, hostname `SW_Eli`)**
+
+| Port | Description | Mode | Connects to |
+| --- | --- | --- | --- |
+| Fa0/3 | PROXMOX | Trunk, native 999, allowed 10,20,30,40,50,60,100, DTP off | Dell G5 (`nic0`) |
+| Fa0/24 | UPLINK-MODEM | Access VLAN 100 | Home router |
+| Fa0/22 | — | Access VLAN 30 | Not connected |
+| All others | — | VLAN 1 | Not connected (hardening pending) |
+
+- VLANs created: 10 MGMT, 20 SERVERS, 30 CLIENTS, 40 DMZ, 50 ATTACKER, 60 SOC, 100 HOME, 999 DEAD.
+- Both connected links negotiated 100 Mbps full duplex, so there is no duplex mismatch.
+- The Gi0/1 and Gi0/2 slots hold **1000BASE-SX** (multimode fiber) GBICs. A gigabit copper trunk to the G5 needs 1000BASE-T GBICs (WS-G5483) instead.
+- Config saved with `write memory`.
+
+```
+SW_Eli#show interfaces trunk
+Port        Mode         Encapsulation  Status        Native vlan
+Fa0/3       on           802.1q         trunking      999
+
+Port        Vlans allowed on trunk
+Fa0/3       10,20,30,40,50,60,100
+```
+
+Pending hardening: move unused ports to VLAN 999 and shut them down; shut down `interface Vlan1`.
+
+**Proxmox networking**
+
+- Backed up `/etc/network/interfaces` to `/root/interfaces.bak` before changing it.
+- Physical NIC is `nic0` (Proxmox pinned interface names).
+- `vmbr0` made VLAN-aware. Management moved to tagged VLAN 100 at `10.0.0.90/24`, since untagged traffic now lands in the dead native VLAN 999.
+
+**OPNsense 25.7 (VM 100)**
+
+- UFS install on a 20 GB virtual disk. UFS chosen over ZFS for a 2 GB RAM firewall.
+- Two VirtIO NICs on `vmbr0`: `vtnet0` tagged 100 (WAN) and `vtnet1` untagged (trunk for every lab VLAN).
+
+| Interface | Device | Address |
+| --- | --- | --- |
+| WAN | `vtnet0` (Proxmox tag 100) | `10.0.0.91/24`, gateway `10.0.0.1`, IPv6 disabled |
+| LAN (MGMT) | `vtnet1` VLAN 10 | `10.10.10.1/24` |
+| SERVERS | `vtnet1` VLAN 20 | `10.10.20.1/24` |
+| CLIENTS | `vtnet1` VLAN 30 | `10.10.30.1/24` |
+| DMZ | `vtnet1` VLAN 40 | `10.10.40.1/24` |
+| ATTACKER | `vtnet1` VLAN 50 | `10.10.50.1/24` |
+| SOC | `vtnet1` VLAN 60 | `10.10.60.1/24` |
+
+- WAN: *Block private networks* and *Block bogon networks* unticked, because the WAN is an RFC1918 network.
+- IPv6 disabled on WAN to keep the lab IPv4-only. The installer had picked up an ISP IPv6 address via SLAAC.
+- Admin access: WAN rule passing TCP from my laptop (`10.0.0.18/32`) to This Firewall on 443. A deliberate, single-host exception until admin moves to VLAN 10.
+- *Firewall → Settings → Advanced → Disable reply-to* enabled. Verified in the loaded ruleset:
+
+```
+pass in quick on vtnet0 inet proto tcp from 10.0.0.18 to (self) port = https flags S/SA keep state
+```
+
+**DHCP**
+
+- Dnsmasq, listening on CLIENTS, DMZ and ATTACKER. ISC DHCP is not used (end-of-life).
+- Ranges `.100–.200` on VLANs 30, 40 and 50. Gateway and DNS are the interface IP for now; DNS moves to DC01 (`10.10.20.10`) once it exists.
+- VLANs 10, 20 and 60 are static-only.
+
+**Verification**
+
+Alpine LXC (CT 101) on `vmbr0`, re-tagged per test:
+
+| VLAN tag | Lease |
+| --- | --- |
+| 30 | `10.10.30.118` from `10.10.30.1` |
+| 40 | `10.10.40.118` |
+| 50 | `10.10.50.118` |
+
+- Proves the path container → VLAN-aware bridge → `vtnet1` trunk → OPNsense VLAN interface → Dnsmasq.
+- That path stays inside `vmbr0`. The switch trunk itself is proven by VLAN 100: Proxmox management and the OPNsense WAN reach the home router through Fa0/3 → Fa0/24.
+- No internet or inter-VLAN traffic yet. New interfaces are default-deny until the firewall policy is written.
+
+**Next**
+
+- Firewall policy: default deny, lab → home block on `10.0.0.0/24`, AD ports to DC01, SIEM ingest to VLAN 60.
+- Switch hardening.
+- Elastic SIEM VM in VLAN 60.
+
+### Issues and fixes
+
+| Issue | Cause | Fix |
+| --- | --- | --- |
+| Test container got no DHCP lease on VLAN 30 | Dnsmasq wasn't enabled or listening on the new VLAN interfaces | Enabled Dnsmasq and added CLIENTS, DMZ and ATTACKER to its interfaces; confirmed with `udhcpc` |
+| OPNsense GUI unreachable from the home LAN over WAN | WAN rules add `reply-to (vtnet0 10.0.0.1)`, so replies went to the home router instead of the laptop on the same subnet. The rule's port range was also `any–443` | Enabled *Disable reply-to*, set the port to 443, verified with `pfctl -sr` |
+| GUI dropped every time a change was applied | Applying reloads the firewall, undoing a manual `pfctl -d`, before any WAN allow rule existed | Created the WAN allow rule before applying anything else |
+
+---
+
+## 2026-10-22 · Planning
+
+### Planning and documentation
+
+- Drew the [virtual network diagrams](../../docs/virtual-network.md): topology (trunk, VLAN-aware bridge, OPNsense, VMs) and five hop-by-hop traffic flows.
+- Wrote the baseline [firewall policy](../../01-network/firewall-policy.md): every zone gets DNS and ping to its own gateway, a logged home block, a logged cross-zone block, then internet.
+- Decided Kali stays bare metal on mini PC 2 instead of a container or VM (DD-014).
+- Started planning infrastructure as code: Terraform for VMs, Ansible for configuration. Not adopted yet.
+
+### Next
+
+- Build the firewall baseline.
+
+---
+
+## 2026-10-23 · Firewall
+
+### Firewall baseline (started)
+
+- OPNsense config backup downloaded before any change (kept locally, never committed: it contains password hashes and certificate keys).
+- Aliases created: `Home_LAN` (`10.0.0.0/24`), `LAB_NETS` (`10.10.0.0/16`), `RFC1918` (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`).
+- Approach: baseline rules on every zone first, service rules added with the VM that needs them (DD-016). Policy in [firewall policy](../../01-network/firewall-policy.md).
+- CLIENTS (VLAN 30): first rules in place: ping to own gateway, block `Home_LAN` (logged), allow internet.
+
+### Next
+
+- Finish CLIENTS (DNS to gateway, cross-zone block, rule order), then SERVERS, DMZ, SOC and ATTACKER.
+
+---
+
+## 2026-10-24 · Firewall, DC01, WS01
+
+### Firewall baseline (CLIENTS and SERVERS completed)
+
+- New port alias `AD_Ports`: 53, 88, 135, 389, 445, 464, 636, 3268, 3269, 49152:65535. A rule's port field takes one port or a range, so a list needs an alias.
+- AD rule added early because DC01 was built the same night.
+- Rules reordered so allows sit above the blocks (first match wins).
+
+CLIENTS (VLAN 30), final order:
+
+| # | Action | Proto | Destination | Port | Description |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Pass | TCP/UDP | CLIENTS address | 53 | DNS to gateway |
+| 2 | Pass | ICMP | CLIENTS address | | Ping own gateway |
+| 3 | Pass | TCP/UDP | `10.10.20.10` | `AD_Ports` | AD to DC01 |
+| 4 | Block (log) | any | `Home_LAN` | | Lab to home |
+| 5 | Block (log) | any | `RFC1918` | | Cross-zone block |
+| 6 | Pass | any | any | | Internet |
+
+SERVERS (VLAN 20): the same set without the AD rule (5 rules), built by cloning the CLIENTS rules.
+
+DMZ, SOC and ATTACKER rule sets are still pending.
+
+### Licensing decision
+
+- Windows evaluation media only; no borrowed product keys (DD-015).
+
+### DC01 (VM 120)
+
+- Windows Server 2022 **Standard Evaluation (Desktop Experience)**: Standard because Datacenter's extras are hypervisor/storage features a DC doesn't use; GUI for learning and screenshots.
+- q35, OVMF (UEFI) with EFI disk, TPM 2.0, VirtIO SCSI single, 60 GB on `local-lvm` (Discard, SSD emulation, IO thread), 4 GB RAM, 2 vCPU (host), `vmbr0` tag 20.
+- Storage driver loaded during setup from the VirtIO ISO (`vioscsi\2k22\amd64`); `virtio-win-guest-tools.exe` installed the network driver and QEMU agent afterwards.
+- Static `10.10.20.10/24`, gateway and DNS `10.10.20.1` (DNS moves to itself after promotion). Renamed to `DC01`.
+- Activated: `ServerStandardEval`, `TIMEBASED_EVAL` channel, 180 days. **Expires around 2027-04-22.**
+- IPv6 left enabled: Microsoft doesn't support disabling it on domain controllers. Only link-local, never routed.
+- Tests: gateway, internet and DNS work; `10.0.0.1` blocked.
+
+### WS01 (VM 130)
+
+- Windows 11 **Enterprise Evaluation** (90 days). A consumer ISO asked for a product key, so it was replaced with the eval (see issues).
+- Same VM layout as DC01, but 64 GB on `vm-lab` and `vmbr0` tag 30. TPM 2.0 required by Windows 11.
+- Setup: `vioscsi\w11\amd64` for the disk, `NetKVM\w11\amd64` loaded at the network screen, local account `labadmin`.
+- DHCP lease `10.10.30.148` from `10.10.30.1`, DNS `10.10.30.1`, suffix `internal` (OPNsense default; becomes `lab.local` later).
+- Tests: `8.8.8.8` replies, `github.com` resolves and replies, `10.0.0.1` times out (home block).
+- Not joined to the domain yet: it may become the sysprep template for WS02.
+
+### Next
+
+- Promote DC01 to `lab.local`, then test `AD_Ports` from WS01 and point CLIENTS DHCP DNS at `10.10.20.10`.
+- DMZ, SOC and ATTACKER rules; switch hardening; Fa0/2 to VLAN 50; Kali on mini PC 2.
+
+### Issues and fixes
+
+| Issue | Cause | Fix |
+| --- | --- | --- |
+| Windows setup showed no disk | Windows has no driver for the VirtIO SCSI controller | Load driver from the VirtIO ISO: `vioscsi\w11\amd64` (WS01), `vioscsi\2k22\amd64` (DC01) |
+| Microsoft Evaluation Center download never started after the form | A browser extension blocked the redirect | Downloaded from an incognito window |
+| Windows 11 setup asked for a product key | The ISO was the consumer (Home/Pro) media | Switched to the Windows 11 Enterprise evaluation ISO |
+
+---
+
+## 2026-10-26 · Domain, templates, switch hardening, Kali
+
+### Cross-zone check
+
+- From the Windows 11 client (VLAN 30), `ping 10.10.20.10` timed out, and OPNsense Live View logged the block on CLIENTS with the label **RFC1918 Block**. First logged proof that zones are separated.
+
+### Firewall baseline completed
+
+- ATTACKER, SOC and DMZ rule sets built (CLIENTS and SERVERS were done on 2026-10-24). Every lab zone now has the baseline policy. Details in [firewall policy](../../01-network/firewall-policy.md).
+- DMZ needs no rule for traffic from Kali: the ATTACKER → DMZ allow lives on the ATTACKER interface, and OPNsense is stateful, so replies return automatically.
+
+### Active Directory: `cybereli.local`
+
+- DC01 fully patched, then snapshot `clean-pre-AD`.
+- Promoted to the first domain controller of a new forest:
+
+```powershell
+Install-WindowsFeature AD-Domain-Services -IncludeManagementTools
+Install-ADDSForest -DomainName "cybereli.local" -DomainNetbiosName "CYBERELI" -InstallDns
+```
+
+- Domain name `cybereli.local` instead of the planned `lab.local` (DD-017).
+- CLIENTS DHCP (Dnsmasq) options changed so clients find the domain: `dns-server [6]` = `10.10.20.10`, `domain-name [15]` = `cybereli.local`.
+
+### Windows 11 template and second client
+
+- Original Windows 11 VM (130) kept as **WS01**. Sysprep gives every clone a new machine SID, so the original and the clones never conflict.
+- Full clone of 130 → VM **9000** `tpl-win11-ent` on `vm-lab`, generalized and converted to a Proxmox template:
+
+```
+C:\Windows\System32\Sysprep\sysprep.exe /generalize /oobe /shutdown
+```
+
+- Full clone of the template → VM **131** `WS02` (tag 30, new MAC).
+
+### Domain join
+
+- WS01 and WS02 joined from an elevated PowerShell:
+
+```powershell
+Add-Computer -DomainName cybereli.local -Credential CYBERELI\Administrator -Restart
+```
+
+- WS02 was first named `WS202` by mistake and renamed as a domain member, which also renames its AD object:
+
+```powershell
+Rename-Computer -NewName WS02 -DomainCredential CYBERELI\Administrator -Restart
+```
+
+- Verified on DC01:
+
+```
+PS> Get-ADComputer -Filter * | Select Name, DNSHostName
+Name  DNSHostName
+----  -----------
+DC01  DC01.cybereli.local
+WS01  WS01.cybereli.local
+WS02  WS02.cybereli.local
+```
+
+### Switch hardening
+
+| Port | Description | Mode | Status |
+| --- | --- | --- | --- |
+| Fa0/3 | TRUNK-PVE01 | Trunk, native 999, allowed 10,20,30,40,50,60,100, DTP off | Connected (Dell G5) |
+| Fa0/19 | KALI | Access VLAN 50, portfast, BPDU guard | Connected (Kali, mini PC 1) |
+| Fa0/24 | UPLINK-MODEM | Access VLAN 100, portfast | Connected (home router) |
+| Fa0/1–2, Fa0/4–18, Fa0/20–23, Gi0/1–2 | UNUSED | Access VLAN 999 | Shut down |
+
+- Kali moved to **Fa0/19** (planned as Fa0/2).
+- `interface Vlan1` shut down. The switch's management address is now `10.10.10.2` on `Vlan10`, with `ip default-gateway 10.10.10.1`, so it can later send logs through OPNsense.
+- Old web GUI disabled (`no ip http server`). Remote management (SSH) not set up yet; the switch is managed from the console.
+- Config saved with `write memory`. Interface config in [switch config](../../01-network/switch-config.md).
+
+### Verification
+
+- Switch ↔ OPNsense ping on VLAN 10 in both directions. The first lab VLAN proven **across the physical trunk**, not just inside the Proxmox bridge.
+- The first run from OPNsense lost its first 14 packets while the new `Vlan10` interface came up (spanning tree and ARP), then replied steadily at ~1.5 ms, TTL 255. The switch's own ping to `10.10.10.1` was 5/5.
+
+### DNS hardening on DC01
+
+- Forwarder confirmed: `10.10.20.1` (OPNsense). `Resolve-DnsName github.com` answers through it.
+- Root hints disabled (`Set-DnsServerForwarder -UseRootHint $false`), so every DNS query in the lab leaves through one resolver. That gives one place to log and hunt DNS later.
+
+```
+UseRootHint : False
+IPAddress   : 10.10.20.1
+```
+
+- Snapshots taken: DC01 `ad-promoted`, WS01 and WS02 `domain-joined`.
+
+### Kali (mini PC 1)
+
+- Installed bare metal on **mini PC 1** (the former Wazuh box; Wazuh is retired). Mini PC 2 becomes the automation control node (DD-020).
+- Graphical install, hostname `kali01`, no domain, guided full-disk partitioning. Connected to switch port Fa0/19 (VLAN 50).
+- First boot: DHCP lease in `10.10.50.x` with internet, proving the ATTACKER rules work across the physical port and trunk.
+- Static address set with `nmtui`: `10.10.50.10/24`, gateway and DNS `10.10.50.1` (outside the DHCP range `.100–.200`).
+
+### Attacker zone verification
+
+Reachability checks from Kali (`10.10.50.10`), confirmed in OPNsense Live View:
+
+| Destination | Result | Live View label |
+| --- | --- | --- |
+| `10.0.0.1` (home router) | Blocked | Not allow to cross home lan |
+| `10.10.30.1` (CLIENTS gateway) | Blocked | *(empty: rule has no description yet)* |
+| Internet | Allowed | — |
+
+- The lab-zone block is working, but its rule has no description, so its log entries carry no label. Adding "Lateral movement attempt" makes these events searchable by name in the SIEM.
+
+### Next
+
+- Add the description to the ATTACKER `LAB_NETS` block rule.
+- Build the Elastic SIEM VM in VLAN 60.
+
+### Issues and fixes
+
+| Issue | Cause | Fix |
+| --- | --- | --- |
+| `Add-Computer`: "The specified domain either does not exist or could not be contacted" | Clients still used OPNsense (`10.10.30.1`) for DNS, which doesn't know the AD domain | Dnsmasq DHCP option `dns-server [6]` = `10.10.20.10` on CLIENTS, then `ipconfig /renew` |
+| DNS suffix showed `10.10.20.10` | The `domain-name [15]` option had the IP instead of the domain | Set `domain-name [15]` = `cybereli.local` |
+| `Add-Computer`: "Access is denied" on WS02 | PowerShell wasn't running as administrator | Re-ran from an elevated PowerShell |
+| WS02 joined as `WS202` | Typo when renaming | `Rename-Computer -DomainCredential` from the domain member |
+| Gi0/1–2 still in VLAN 1 and enabled | Missed by the unused-port range command | Parked in VLAN 999 and shut down separately |
+| Kali USB didn't boot | Stick was in a USB port the mini PC doesn't boot from | Moved it to another USB port, then F12 boot menu |
+| `nmcli con mod`: "invalid or not allowed setting 'ipv4'" | Connection name or line break didn't parse as intended | Set the static IP with `nmtui` instead |
+
+---
+
+## 2026-10-28 · Elastic SIEM: Elasticsearch and Kibana
+
+### VM 160 · `elastic01`
+
+| Setting | Value |
+| --- | --- |
+| OS | Ubuntu Server 24.04 LTS (chosen over 26.04 for proven Elastic support) |
+| CPU | 1 socket × 4 cores, type `host` |
+| Memory | 10240 MiB, ballooning off |
+| Disk | 100 GB on `vm-lab`, Discard on; root LV extended to the full disk |
+| Network | `vmbr0` tag 60 (SOC), static `10.10.60.10/24`, gateway and DNS `10.10.60.1` |
+
+- DNS points at the SOC gateway, not DC01: the SOC zone can't reach other lab zones by design.
+- One socket instead of two: the G5 has a single physical CPU, and one virtual socket avoids odd NUMA behaviour in the guest.
+
+### Admin access from the laptop
+
+OPNsense **NAT → Port Forward** on WAN, source `10.0.0.18/32` only, each with an associated filter rule:
+
+| WAN | → | Purpose |
+| --- | --- | --- |
+| `10.0.0.91:2222` | `10.10.60.10:22` | SSH to `elastic01` |
+| `10.0.0.91:5601` | `10.10.60.10:5601` | Kibana |
+
+- A single-host exception, like the WAN GUI rule (DD-012). Removed once admin moves to the control node in VLAN 10 (DD-020).
+
+### Elasticsearch 9.5.5
+
+- Installed from Elastic's 9.x APT repository. Security (TLS and authentication) is enabled automatically on install. The generated `elastic` password is stored in the password manager.
+- `cluster.name: cybereli-siem`, `node.name: elastic01`.
+- JVM heap fixed at 4 GB (`/etc/elasticsearch/jvm.options.d/heap.options`), leaving about 6 GB for Kibana, Fleet Server, the OS and the file cache Elasticsearch searches from.
+
+```
+$ curl --cacert /etc/elasticsearch/certs/http_ca.crt -u elastic https://localhost:9200
+  "name" : "elastic01",
+  "cluster_name" : "cybereli-siem",
+  "version" : { "number" : "9.5.5", ... },
+  "tagline" : "You Know, for Search"
+
+$ curl ... "https://localhost:9200/_cat/nodes?v&h=name,heap.max"
+name      heap.max
+elastic01      4gb
+```
+
+### Kibana
+
+- Encryption keys generated with `kibana-encryption-keys generate` and added to `kibana.yml`. Detection rules, alerting and Fleet need them.
+- `server.host: "0.0.0.0"`, `server.publicBaseUrl: "http://10.0.0.91:5601"` (the address reached through the port forward).
+- Enrolled with Elasticsearch using an enrollment token (`elasticsearch-create-enrollment-token -s kibana`) and the verification code (`kibana-verification-code`), then logged in as `elastic`.
+- Backups: `kibana.yml.bak` on the VM; the three encryption keys stored in the password manager. Neither goes in the repo.
+- Kibana is served over plain HTTP for now, reachable only from the laptop. HTTPS is a later hardening step.
+- Snapshot `elastic-base` taken.
+
+### Next
+
+- Fleet Server on `elastic01`, a `Fleet_Ports` alias (8220, 9200) allowed from every zone above the blocks.
+- Telemetry: Sysmon, audit policy GPO, PowerShell script-block logging, Elastic Agent on DC01, WS01, WS02.
+
+---
+
+## 2026-10-29 · Fleet, Sysmon and the first Windows telemetry
+
+### Fleet Server
+
+- Kibana → Fleet → **Add Fleet Server → Quick Start**, name `fleet-elastic01`, URL `https://10.10.60.10:8220`.
+- Installed on `elastic01` with the **Linux x86_64** tar command (the page defaulted to the ARM build). Agent 9.5.5, matching Elasticsearch.
+- The command already pointed at `https://10.10.60.10:9200` with the CA fingerprint. Fleet's default output was checked: hosts `https://10.10.60.10:9200`, fingerprint set, so remote agents can ship data.
+- The Quick Start uses a **self-signed certificate** on 8220: traffic is encrypted, but agents can't verify the server, so they enroll with `--insecure` (DD-022).
+- No firewall change was needed for Fleet Server itself: it talks to Elasticsearch on the same VM.
+
+### Firewall: agents to the SIEM
+
+- New port alias `Fleet_Ports`: 8220 (agent check-in), 9200 (data).
+- Rule on **SERVERS** and **CLIENTS**, above the home and RFC1918 blocks: pass TCP `<ZONE> net` → `10.10.60.10` port `Fleet_Ports`, description "Elastic agent to SIEM".
+
+### Agent policy `Windows endpoints`
+
+| Integration | Collects |
+| --- | --- |
+| System | Windows Security, System and Application event logs (logons, account changes, Kerberos), basic host metrics |
+| Windows | Sysmon Operational; PowerShell (IDs 400, 403, 600, 800); PowerShell Operational (4103–4106); Forwarded |
+
+- Integration defaults kept; Windows performance metrics turned off. No event filtering at collection: filtering belongs in detections, not at the source.
+- Elastic Defend (EDR) left off for now, so attacks can be observed rather than blocked (DD-023).
+
+### Sysmon
+
+- Installed on DC01, WS01 and WS02 with Olaf Hartong's **sysmon-modular** standard config, which maps rules to MITRE ATT&CK:
+
+```powershell
+Invoke-WebRequest https://download.sysinternals.com/files/Sysmon.zip -OutFile Sysmon.zip
+Expand-Archive Sysmon.zip -DestinationPath . -Force
+Invoke-WebRequest https://github.com/olafhartong/sysmon-modular/releases/latest/download/sysmonconfig.xml -OutFile sysmonconfig.xml
+.\Sysmon64.exe -accepteula -i sysmonconfig.xml
+```
+
+### Admin access: RDP
+
+- The Proxmox console can't paste into Windows, so RDP was enabled and reached through laptop-only port forwards: `10.0.0.91:33891` → DC01, `33892` → WS01, `33893` → WS02.
+- Considered RDP from DC01 to the workstations instead and rejected it: it needs a SERVERS → CLIENTS firewall hole, and using a domain controller as a jump host with Domain Admin credentials is exactly what the AD tiering model forbids (DD-024).
+
+### Agents enrolled
+
+All four agents **Healthy**, version 9.5.5:
+
+| Host | Policy |
+| --- | --- |
+| `elastic01` | Fleet Server Policy |
+| DC01 | Windows endpoints |
+| WS01 | Windows endpoints |
+| WS02 | Windows endpoints |
+
+### Verification in Kibana
+
+```
+host.name : "dc01" and event.dataset : "windows.sysmon_operational"
+```
+
+197 Sysmon events from DC01 in 15 minutes, already mapped to ECS. Examples: Event ID 11 (FileCreate) and Event ID 3 (network connection to `52.123.128.14:443`).
+
+```
+event.code : "4624" and winlog.event_data.LogonType : "10"
+```
+
+The first security event the SIEM caught: my own RDP logon to DC01 at 18:29, parsed as `event.action: logged-in`, `event.category: authentication`. It predates the agent install (~18:50): on first install the agent reads the existing event log, so history that hasn't rolled over is collected too.
+
+### Next
+
+- Static DHCP mappings for WS01 and WS02, so their RDP port forwards can't drift.
+- Audit policy GPO plus PowerShell script block and module logging.
+- Firewall and switch logs into Elastic.
+- DMZ web server.
+
+### Issues and fixes
+
+| Issue | Cause | Fix |
+| --- | --- | --- |
+| Fleet Server install command was for the wrong CPU | The page defaulted to the Linux **aarch64** (ARM) tab | Switched to **Linux x86_64** |
+| Couldn't paste commands into Windows | The Proxmox console doesn't support clipboard paste into Windows guests | RDP through laptop-only port forwards |
+| RDP to DC01 failed after enabling it | Remote Desktop wasn't listening until the service restarted. Live View showed OPNsense forwarding correctly to DC01, isolating the problem to the host | Rebooted DC01 |
+| sysmon-modular download returned 404 | The configs moved from the repository to GitHub release assets | Download from `releases/latest/download/sysmonconfig.xml` |
+
+---
+
+## 2026-10-31 · Static DHCP and the audit policy GPO
+
+### Decisions carried over from 2026-10-30
+
+- **Pipeline platform:** GitLab CE on mini PC 2 becomes the internal source of truth for detection-as-code, with a push mirror to GitHub as the public portfolio (DD-025).
+- **Management plane:** GitLab, its runner, Terraform and Ansible all live on mini PC 2 in VLAN 10, outside the hypervisor they manage (DD-026).
+
+### Static DHCP for the workstations
+
+| Host | Reserved IP | Matched on |
+| --- | --- | --- |
+| `ws01` | `10.10.30.21` | WS01's MAC (`BC:24:11:…`) |
+| `ws02` | `10.10.30.22` | WS02's MAC |
+
+- Dnsmasq **Hosts** entries in OPNsense, outside the dynamic range (`.100–.200`).
+- Port forwards updated first (`33892` → `.21`, `33893` → `.22`), then both VMs rebooted from Proxmox to pick up the reserved addresses, so RDP access never broke.
+- Why: firewall logs show IPs, not hostnames. A fixed address means `10.10.30.21` is always WS01, in today's logs and last month's.
+
+### GPO `Lab - Audit and PowerShell Logging`
+
+Linked at the domain root (`cybereli.local`), so it applies to DC01, WS01, WS02 and every machine added later.
+
+**Advanced Audit Policy**
+
+| Category | Subcategory | Audit | Key events |
+| --- | --- | --- | --- |
+| Account Logon | Credential Validation | Success, Failure | 4776 |
+| | Kerberos Authentication Service | Success, Failure | 4768, 4771 |
+| | Kerberos Service Ticket Operations | Success, Failure | 4769 (Kerberoasting) |
+| Account Management | User / Security Group / Computer Account Management | Success | 4720, 4728, 4741 |
+| Detailed Tracking | Process Creation | Success | 4688 |
+| DS Access | Directory Service Access | Success | 4662 (DCSync) |
+| Logon/Logoff | Logon | Success, Failure | 4624, 4625 |
+| | Special Logon | Success | 4672 |
+| | Account Lockout | Failure | 4740 |
+| Object Access | Other Object Access Events | Success | 4698 (scheduled tasks) |
+| Policy Change | Audit Policy Change | Success | 4719 |
+
+**Other settings**
+
+- *Audit: Force audit policy subcategory settings to override audit policy category settings*: **Enabled**, so the legacy category settings can't silently win.
+- *Include command line in process creation events*: **Enabled**.
+- PowerShell **Module Logging** (modules `*`) and **Script Block Logging**: **Enabled**. Invocation start/stop logging left off (high volume, little value).
+
+### Verification
+
+- `gpupdate /force` on all three hosts; `auditpol /get /subcategory:"Process Creation"` → **Success**.
+- **4104 (script block)** on WS01: every typed command captured (`auditpol`, `gpresult`, `$Host`).
+- **4688 (process creation)** on WS01 from `system.security`, with the full command line: `"C:\WINDOWS\system32\whoami.exe" /all`.
+- The same `whoami /all` is also in **Sysmon Event ID 1**, which sysmon-modular tagged automatically as **MITRE ATT&CK T1033 (System Owner/User Discovery)**.
+
+One action is now recorded by two independent sources, Sysmon and the Security log. An attacker would have to defeat both to go unseen.
+
+**Notes for detection writing:**
+
+- Elastic labels Event 4104 as `event.action: "Execute a Remote Command"` regardless of where the command ran. Rules should key on `event.code` and `powershell.file.script_block_text`, not on that label.
+- Every interactive PowerShell prompt redraw produces a 4104 for the built-in `prompt` function. That's noise to filter out in detections.
+
+### Next
+
+- Add **Directory Service Changes** (5136) under DS Access alongside Directory Service Access.
+- Scenario 001 on WS01.
+
+### Issues and fixes
+
+| Issue | Cause | Fix |
+| --- | --- | --- |
+| No 4688 events after applying the GPO | `auditpol` showed *No Auditing*: the GPO's **Settings** report had no "Advanced Audit Configuration" section, so none of the subcategories were saved | Configured each subcategory again with "Configure the following audit events" ticked; confirmed in the Settings report, then `gpupdate /force` |
+| First 4688 test returned nothing even once logging should have worked | The test command (`whoami /all`) ran before `gpupdate` applied the policy; logging isn't retroactive | Re-ran the test after the policy applied |
+| DS Access set to *Directory Service Access* instead of the planned *Directory Service Changes* | Similar names | Kept it (4662 helps detect DCSync) and planned to add Changes (5136) too |
+
+---
+
+## 2026-11-01 · Scenario 001: the first detection
+
+### Scenario 001 · PowerShell with an encoded command
+
+Full write-up: [scenario 001](../../scenarios/001-powershell-encoded-command/README.md).
+
+- **Technique:** T1059.001 PowerShell + T1027 obfuscation, emulated with a benign Base64-encoded command on WS02 (`-EncodedCommand` and `-enc`).
+- **Telemetry:** seen by Sysmon Event ID 1, Security 4688 and PowerShell 4104. 4104 shows the decoded command: `Write-Output "scenario-001"; whoami`.
+- **Detection:** first Sigma rule in the repo, converted to EQL (case-insensitive `like~`) and to KQL for Microsoft Defender. Deployed by hand as an Elastic Event Correlation rule over `logs-windows.sysmon_operational-*` and `logs-system.security-*`.
+- **Validation:** 4 alerts (2 runs × 2 sources). Elastic's Analyzer rebuilt the process tree: interactive `powershell.exe` → encoded `powershell.exe` → `whoami.exe` 342 ms later. Alerts collected in case SCN-001.
+
+### Repo additions
+
+- `detections/README.md`: rule index.
+- `detections/sigma/windows/process_creation/proc_creation_win_powershell_encoded_command.yml`
+- `detections/elastic/proc_creation_win_powershell_encoded_command.eql`
+- `detections/kql/proc_creation_win_powershell_encoded_command.kql`
+- `scenarios/001-powershell-encoded-command/README.md`
+
+### Next
+
+- Add screenshots to `scenarios/001-powershell-encoded-command/evidence/` with the file names the write-up references.
+- Re-run the emulation against the corrected rule (revision 1) and confirm both sources still alert.
+- Add **Directory Service Changes** (5136) to the audit GPO.
+- Scenario 002 idea: a 4104-based rule that catches PowerShell regardless of the host process.
+
+### Issues and fixes
+
+| Issue | Cause | Fix |
+| --- | --- | --- |
+| EQL query returned nothing | It was pasted into Discover, which only runs KQL and Lucene | Tested in the rule's Preview instead |
+| Changed a field the rule didn't need changed | Assumed `process.executable.caseless` was missing from Windows integration data. Verified on 2026-11-02 that it exists (6,764 4688 events) | Revision 1 uses `process.executable`, which behaves the same with `like~`. Lesson: check in Discover before changing a rule |
+| Rule searched every data stream | Index patterns included `logs-*` | Narrowed to the Sysmon and Security data streams |
+
+---
+
+## 2026-11-02 · GitLab CE on the control node
+
+### Control node `ctl01` (mini PC 2)
+
+- Mini PC 2 wiped and rebuilt as **`ctl01`**, the lab's management host outside the hypervisor (DD-026). It will run GitLab, the CI runner, Terraform and Ansible.
+- Switch port **Fa0/20**: access VLAN 10, `nonegotiate`, portfast, BPDU guard.
+- Ubuntu Server 24.04 LTS, standard install, OpenSSH server.
+  - Static `10.10.10.20/24`, gateway and DNS `10.10.10.1`. DC01 isn't used for DNS because the Mgmt baseline blocks other lab subnets.
+  - The installer gave the root logical volume only about half the disk; it was extended to the full 70 GB during install.
+  - 4 GB swap file (installer default).
+- OPNsense port forwards from the laptop only: `2223` → `10.10.10.20:22` (SSH) and `8929` → `10.10.10.20:8929` (GitLab web).
+
+### GitLab CE
+
+- Installed from GitLab's official apt repository. The repo setup script was downloaded and read before running it, not piped straight into bash.
+- **Version 19.5.3**, past the fixes for two recent critical RCEs: CVE-2026-97229 (in CISA KEV, fixed in 19.4.2) and CVE-2026-110264 (fixed in 19.5.1).
+- `external_url` is `http://gitlab.cybereli.local:8929`. The laptop resolves the name to the OPNsense WAN address through its hosts file; `ctl01` resolves it to itself through `/etc/hosts`. Same URL from both sides, which the CI runner will need.
+- Tuned for an 8 GB host shared with the runner and Ansible (GitLab's memory-constrained settings): Puma in single mode, Sidekiq concurrency 10, Prometheus off, `MALLOC_CONF` to return memory sooner.
+- **Hardening:**
+  - Root password changed from the generated one.
+  - Public sign-up disabled.
+  - Public visibility level restricted, default project and group visibility Private.
+  - A personal admin account for daily use; `root` kept as break-glass only.
+- Group `cybereli`, private project `detection-lab`. The full history was pushed from the laptop with a token limited to `read_repository` and `write_repository`, 90-day expiry.
+- The laptop repo now has two remotes: `origin` (GitHub) and `gitlab`.
+
+### Scenario 001 corrections
+
+- **Field check:** the alerts without the Analyzer icon were Security 4688 (`system.security`), so revision 0 already matched both sources. Discover found `process.executable.caseless` on 6,764 4688 events in two days. The earlier "missing field" claim was wrong; lesson 1 was rewritten to say so.
+- Write-up corrected: all 4 alerts credited to revision 0, unverified claims removed, Administrator account noted under Gaps.
+- `-Encoding` false positive added to the tuning section.
+- **SigmaHQ credit:** the rule is adapted from SigmaHQ's *Suspicious Execution of Powershell with Base64* (frack113).
+  - The Sigma rule gets `related` (type `derived`), the reference URL, and both authors.
+  - The KQL file gets a credit header.
+  - The rule index gets a Credit column.
+  - In Kibana, frack113 was added to the rule's Author field so alerts carry the credit.
+
+### Repo
+
+- **Licenses:** DRL 1.1 for `detections/`, CC BY 4.0 for everything else, plus a License section in the README.
+- **README:**
+  - Retitled **Detection Engineering Lab**.
+  - New detection-as-code and infrastructure-as-code goals.
+  - A pipeline diagram (GitLab → `sigma check` → convert → validate → deploy, with a GitHub push mirror), marked as not built yet.
+  - Status line brought up to date.
+- **Network diagrams:** `ctl01` on Fa0/20, and a new laptop → GitLab flow.
+- Firewall alias renamed to `Home_LAN` across the docs.
+
+### Next
+
+- Turn off **Auto DevOps** (instance-wide and on the project). Without a runner it queues pipelines that can't run.
+- Install GitLab Runner on `ctl01` and register it.
+- Make GitLab the source of truth: a **push mirror** to GitHub, and the laptop pushes only to GitLab.
+- HTTPS for GitLab (shared lab CA with Fleet), then switch the laptop to a fine-grained token.
+- Add the `-Encoding` filter to the Scenario 001 rule. It's a good first change to push through the pipeline.
+- Re-test with a standard domain user instead of Administrator.
+
+### Issues and fixes
+
+| Issue | Cause | Fix |
+| --- | --- | --- |
+| Root volume only ~half the disk | Ubuntu's installer doesn't give the root LV the whole volume group by default | Edited `ubuntu-lv` to the maximum in the storage summary |
+| Git Credential Manager warned "Unencrypted HTTP is not recommended" and won't save the token | GCM refuses to store credentials for HTTP remotes | The token is typed at each push until GitLab moves to HTTPS |
+
+
+---
+
+## 2026-11-04 · CI runner, detection-as-code pipeline, Scenario 001 rev 2
+
+### Auto DevOps off
+
+- Disabled instance-wide (Admin → Settings → CI/CD) and on `detection-lab`. With no runner it was queuing pipelines that could never run.
+
+### GitLab Runner on `ctl01`
+
+- Installed from GitLab's official apt repository; the repo setup script was downloaded and read before running it. Chose apt over the binary download the GitLab UI offers, because apt keeps the runner updated alongside GitLab CE.
+- **Version 19.5.2**, same minor release as GitLab 19.5.3.
+- Created as an **instance runner** (Admin → CI/CD → Runners) using GitLab 19's runner authentication token (`glrt-`), not the legacy registration token. Instance scope means a future Terraform/Ansible repo can use the same runner.
+- **Tags** `ctl01`, `shell`; **untagged jobs off**, so a job only lands here if it asks for this runner.
+- **Shell executor**, description `ctl01-shell`, registered against `http://gitlab.cybereli.local:8929` (resolves to `ctl01` itself through `/etc/hosts`). See DD-028.
+- Removed `/home/gitlab-runner/.bash_logout` before the first job. Ubuntu's default one makes shell-executor jobs fail at "Preparing environment".
+
+### First pipeline
+
+- `.gitlab-ci.yml` smoke test: one job in a `test` stage, tagged `ctl01, shell`, printing host, user and Git version.
+- **Pipeline #1 passed** on commit `c92da47` (*CI: add runner smoke test*): 1 second, queued for 3 seconds.
+- Job log confirms the right box and the right user: `Running on ctl01`, `Runner on ctl01 as gitlab-runner`, `git version 2.43.0`.
+
+![Pipeline #1](01-pipeline-1.png)
+
+![Job #1 log](02-job-1-log.png)
+
+### Repo housekeeping
+
+- GitHub push failed with *This repository moved* plus a 500: the `origin` URL used `elimartes15` (lowercase). Set to the exact `https://github.com/Elimartes15/detection-lab.git` and the push went through.
+- From now on, experiments go on a branch, not `main`.
+
+### Push mirror: GitLab → GitHub
+
+- GitHub fine-grained token scoped to `detection-lab` only, **Contents: read/write**, 90-day expiry.
+- GitLab push mirror to `https://github.com/Elimartes15/detection-lab.git`, **Mirror only protected branches**: only `main` reaches GitHub; working branches stay private.
+- Verified with a commit pushed to GitLab only (`94b7816`, trailing-whitespace fix), which appeared on GitHub through the mirror.
+- Laptop `origin` set to fetch-only (`git remote set-url --push origin DISABLED`). The laptop can no longer push to GitHub, enforcing DD-025 locally.
+
+![Push mirror](03-push-mirror.png)
+
+### Pipeline: lint → convert
+
+```
+push ─▶ sigma-check (lint) ─▶ sigma-convert ─▶ converted/ artifacts
+```
+
+- **`sigma-check`:** `sigma check --fail-on-issues detections/sigma/` with sigma-cli 4.0.0 (pipx, `gitlab-runner`'s home). Warnings fail the job, not just errors.
+- **`sigma-convert`:** loops over every rule in `detections/sigma/` and writes EQL (`ecs_windows`) and KQL (`microsoft_xdr`) as job artifacts, kept 30 days. Runs only if lint passes.
+- **Two pinned toolchains** (DD-029): lint on sigma-cli 4.0 / pySigma 2.x; conversion in a separate venv pinned to sigma-cli 3.1.0, pySigma 1.5.1, `pysigma-backend-elasticsearch` 2.1.1, `pysigma-backend-kusto` 1.0.1.
+- `before_script` in `default` sets PATH once for every job.
+- `converted/` added to `.gitignore`: build output is never committed.
+
+### First real change through the pipeline: Scenario 001 rev 2
+
+- Branch `scn001-encoding-filter`:
+  - `filter_main_encoding` (`CommandLine|contains: ' -Encoding '`), condition `all of selection_* and not 1 of filter_main_*`, `modified: 2026-11-04`.
+  - `.gitlab-ci.yml` smoke test replaced by the lint gate.
+- **Lint failed on the first run**, for a reason no one could have seen by reading the rule: ATT&CK v19 (April 2026) split Defense Evasion into **Stealth** (keeps TA0005) and Impair Defenses, and pySigma 4.0 validates against v19. `attack.defense-evasion` → `attack.stealth`. Second run passed: 0 errors, 0 condition errors, 0 issues.
+- Merged by **merge request** (`c46f86a0`); pipeline #8 passed on `main`; the mirror carried it to GitHub.
+- Branch `scn001-conversions`: added the convert stage; EQL and KQL for rev 2 taken from the job artifacts into `detections/elastic/` and `detections/kql/`, merged by MR (`4e1bbca`). The converter emits `process.executable.caseless`; both forms work on this data (lesson 1 of Scenario 001).
+- Kibana rule updated by hand with the repo's EQL (rule revision 2). Deployment from the pipeline is the next stage.
+
+![Lint fails on the ATT&CK v19 tag](04-lint-fail-attack-v19.png)
+
+![Lint passes](05-lint-pass.png)
+
+![Merge request merged, pipeline passed on main](06-mr-merged.png)
+
+![Convert artifacts](07-convert-artifacts.png)
+
+### Rev 2 validation on `ws02` (as `administrator`)
+
+| # | Test | Expected | Result |
+| --- | --- | --- | --- |
+| 1 | `powershell.exe -NoProfile -enc $b64` | Alert | ✅ 2 alerts (Sysmon + 4688), 20:18 |
+| 2 | `powershell.exe -NoProfile -Command "Get-Content C:\Windows\win.ini -Encoding UTF8 \| Out-Null"` | No alert | ✅ No alert: false positive removed |
+| 3 | `powershell.exe -NoProfile -enc $b64 -Encoding x` | Bypass? | ✅ Not a bypass: PowerShell refuses (*a command is already specified with -Command or -EncodedCommand*); payload never runs |
+| 4 | `powershell.exe -NoProfile -WorkingDirectory "C:\Temp\x -Encoding y" -enc $b64` | Bypass? | ❌ **Bypass.** Payload ran (`scenario-001`, `cybereli\administrator`), **no alert** |
+
+![Rev 2 test 1 alerts](08-rev2-test1-alerts.png)
+
+**Finding:** the `-Encoding` exclusion matches anywhere in the command line, which the attacker controls. Putting ` -Encoding ` inside any valid parameter value, here a folder name passed to `-WorkingDirectory`, silences the rule. SigmaHQ's upstream rule uses the same exclusion.
+
+**Fix (rev 3):** remove the filter and make the match precise instead. Every abbreviation of `-EncodedCommand` from `-enco` on is `-enco`, `-encod` or `-encode…`; `-Encoding` starts with `-encodi`, which none of them match. Replace ` -enco` with ` -enco `, ` -encod `, ` -encode`, then re-run all four tests.
+
+### Next
+
+- **Rev 3:** precise flag list, no command-line exclusion; re-run tests 1–4. Consider reporting the bypass upstream to SigmaHQ.
+- Confirm **Pipelines must succeed** is enabled on merge requests.
+- **Deploy stage:** push converted rules to Kibana through the Detection Engine API, so no rule is pasted by hand.
+- **Drift check:** fail the pipeline if committed EQL/KQL differ from what the convert stage generates.
+- HTTPS for GitLab (shared lab CA with Fleet), then a fine-grained token on the laptop.
+- Re-test as a standard domain user; add Directory Service Changes (5136) to the audit GPO.
+
+### Issues and fixes
+
+| Issue | Cause | Fix |
+| --- | --- | --- |
+| GitHub push: *repository moved* + Internal Server Error | `origin` URL case (`elimartes15`) differed from the account (`Elimartes15`); pushes through the redirect failed | `git remote set-url origin` with the exact URL |
+| Lint: `InvalidATTACKTagIssue` on `attack.defense-evasion` | ATT&CK v19 split Defense Evasion; pySigma 4.0 validates against v19 | Tag changed to `attack.stealth` |
+| `sigma plugin install`: *Plugin not compatible with installed pySigma version* | Elasticsearch and Kusto backends don't support pySigma 2.x yet | Separate pinned venv for conversion (DD-029); `--force-install` rejected |
+| Convert job: *'eql' is not one of .* | `.gitlab-ci.yml` still called the unpinned `sigma` (no backends) | Job calls the pinned venv by full path |
+| KQL credit header lost | Artifact file copied over the committed file | Header restored; the deploy stage will generate files with headers |
+| `sigma` not recognized in PowerShell | sigma-cli is only on `ctl01` | Conversion moved into the pipeline instead of installing it on the laptop |
+
+
+---
+
+## 2026-11-07 · Scenario 001 rev 3: closing the bypass
+
+### Housekeeping
+
+- Nov 4 build log merged by MR (`3756805`). Stale branches `scn001-encoding-filter` and `scn001-conversions` deleted on GitLab; their work lives in `main` and in MRs !1 and !2.
+- Lesson: the laptop's `gitlab/main` was stale until `git fetch`. Check GitLab (or fetch) before assuming a branch is unmerged.
+
+### Rev 3: precise match, no exclusion
+
+Rev 2's ` -Encoding ` exclusion was bypassable (2026-11-04, test 4). Rev 3 removes it and fixes the false positive at the source instead:
+
+- ` -enco` → ` -enco ` (trailing space), plus ` -encod ` and ` -encode`. Every abbreviation of `-EncodedCommand` from `-enco` on is covered; `-Encoding` (`-encodi…`) matches none of them.
+- `filter_main_encoding` removed; condition is `all of selection_*`.
+- Branch `scn001-rev3` → `sigma check` passed → EQL/KQL from the `sigma-convert` artifacts → MR to `main`.
+- Kibana rule updated by hand with the repo's EQL (rule revision 3). The KQL credit header was lost in the manual copy a second time and restored; the deploy stage should generate files, headers included.
+
+### Validation by backtest
+
+Instead of re-running the attacks, the rev 3 query was previewed over the existing telemetry from Nov 1 to Nov 4: the same events that rev 1 and rev 2 saw.
+
+| Time (Nov 4) | Command line | Rev 2 | Rev 3 |
+| --- | --- | --- | --- |
+| 20:16:13 | Test 1: `-enc <b64>` | ✅ alerted | ✅ matches |
+| — | Test 2: `-Command "Get-Content … -Encoding UTF8 …"` | ✅ silent | ✅ silent (no match) |
+| 20:25:30 | Test 3: `-enc <b64> -Encoding x` (payload refused) | silent (excluded) | ✅ matches |
+| 20:27:32 | Test 4: `-WorkingDirectory "C:\Temp\x -Encoding y" -enc <b64>` | ❌ **missed: bypass** | ✅ **matches** |
+
+- All 4 Nov 1 emulation runs (`-EncodedCommand` and `-enc`) still match: 7 executions in total, each seen by both Sysmon and 4688.
+- **Test 3 now matches, and should:** the payload never ran, but a process started with an encoded-command flag. The detection shouldn't depend on whether the attacker's command was valid.
+- `process.args` shows `C:\Temp\x -Encoding y` as **one** argument. Elastic parses the command line the way PowerShell does; the rule searches the unparsed `process.command_line`, which is why the rev 2 exclusion could be planted.
+
+![Rev 3 preview: the event that bypassed rev 2](01-rev3-preview-bypass-event.png)
+
+![Rev 3 backtest over Nov 1–4](02-rev3-backtest.png)
+
+### Next
+
+- **Deploy stage:** push converted rules to Kibana through the Detection Engine API from `main` only (rule_id = Sigma `id`, API key as a masked, protected CI variable, OPNsense rule `ctl01` → `elastic01:5601`). Then retire the hand-made UI rule.
+- **Drift check:** fail the pipeline if committed EQL/KQL differ from the convert stage's output.
+- Open an issue on SigmaHQ's `proc_creation_win_powershell_encode` rule: the ` -Encoding ` exclusion is bypassable via any parameter value; propose the precise prefix list.
+- Live re-test as a standard domain user; 5136 in the audit GPO; HTTPS for GitLab.
+
+### Issues and fixes
+
+| Issue | Cause | Fix |
+| --- | --- | --- |
+| Log branch looked unmerged | Laptop's remote-tracking ref was stale | `git fetch` before trusting `gitlab/main` |
+| KQL credit header lost (again) | Artifact copied over the committed file | Header restored; deploy stage to generate files |
+
+
+---
+
+## 2026-11-09 · Deploy stage: Git to Kibana with no hands
+
+### Pipeline
+
+```
+branch: sigma-check ─▶ sigma-convert ─▶ kibana-deploy-plan   (dry run, no secrets)
+main:   sigma-check ─▶ sigma-convert ─▶ kibana-deploy        (upsert to Kibana)
+```
+
+- **`ci/deploy_kibana.py`** builds one Kibana EQL rule per Sigma rule and **upserts** it through the Detection Engine API: `GET ?rule_id=` → `PUT` if it exists, `POST` if not. `rule_id` = Sigma `id`, so a redeploy updates the same rule instead of duplicating it. Tested against a mock API before the first real run (refuses without a key, creates, then updates).
+- **Query comes from the pipeline**, not the repo: `needs: [sigma-convert]` pulls the job's artifacts, so what ships is what CI generated from the Sigma rule.
+- **Metadata from Sigma:** title, description, level → severity and risk score, authors, license, references, false positives, tags. Index patterns from a logsource map (`windows/process_creation` → Sysmon and Security data streams).
+- **Traceability:** the rule's investigation guide states the source file and commit, and warns that edits in Kibana are overwritten on the next deploy.
+- **Secrets:** `KIBANA_API_KEY` is a **masked, protected** CI variable, so only `main` can read it; branches run the dry-run job. The repo holds only `KIBANA_URL` (RFC1918) and the variable *name*; scanned before merge.
+- `resource_group: kibana-lab` (no concurrent deploys) and `environment: kibana-lab` (deployment history in GitLab → Operate → Environments).
+- `workflow: rules`: branch pipelines only (see issues).
+
+### Deploy identity
+
+- `ctl01` → `http://10.10.60.10:5601/api/status` returned 200: the MGMT zone already reaches Kibana.
+- Role **`ci-rule-deployer`** (least privilege, not `elastic`):
+  - Cluster: `manage_own_api_key`.
+  - Indices: `logs-windows.sysmon_operational-*`, `logs-system.security-*` with `read`, `view_index_metadata`. Required because **a rule runs with the privileges of the key that last deployed it**.
+  - Kibana, Default space: Security **All** and **Rules and Exceptions: All** (`feature_securitySolutionRulesV4.all`). Alerts: None.
+- User `ci-deployer` with that role; API key `gitlab-ci-deploy-2`, 90 days, no custom privileges. The first key was invalidated.
+
+### First automated deploy
+
+- Merge `67666095` → pipeline #23 → `kibana-deploy`: `created: PowerShell Launched With an Encoded Command | rule_id=f2cd0abf-… | revision=0 | enabled=True`.
+- In Kibana: created and updated by `ci-deployer`, first run **Succeeded** with no privilege warnings, both index patterns correct.
+- Hand-made rev 3 rule **disabled** (to delete once the CI rule has run cleanly for a while).
+- Kibana showed "MITRE ATT&CK updated to v19.1", the same Defense Evasion split the lint gate caught on Nov 4.
+
+![Deploy job](05-deploy-success.png)
+
+![Rule deployed by CI](06-rule-deployed-by-ci.png)
+
+![Investigation guide with source and commit](07-investigation-guide.png)
+
+![Old rule disabled](08-old-rule-disabled.png)
+
+### Next
+
+- Delete the disabled hand-made rule.
+- Map Sigma `attack.*` tags to Kibana's `threat` field so CI rules appear on the MITRE ATT&CK coverage page.
+- Drift check: fail if committed `detections/elastic` and `detections/kql` differ from the convert stage, or stop committing them and treat artifacts as the source.
+- KQL credit header generated by the pipeline.
+- SigmaHQ issue for the `-Encoding` exclusion bypass.
+- HTTPS for Kibana and GitLab; a fine-grained token on the laptop.
+
+### Issues and fixes
+
+| Issue | Cause | Fix |
+| --- | --- | --- |
+| MR blocked: merge request pipeline failed, "yaml invalid", 0 jobs | A job with `rules` (`$CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH`) was true in MR pipelines (branch variable unset), so GitLab built an MR pipeline without `sigma-convert`, which it `needs` | `workflow: rules` → branch pipelines only; plan rule requires `$CI_COMMIT_BRANCH` |
+| Deploy: HTTP 403, missing Kibana privilege `rules-read` | Kibana 9.x splits **Rules and Exceptions** out of the Security feature; *Security: All* doesn't include it | Role granted Rules and Exceptions: All |
+| Still 403 after fixing the role | **An API key keeps a snapshot of its owner's privileges at creation** (`limited_by`); role changes don't reach existing keys | New key after the role change; old key invalidated. Verified with `GET /_security/api_key` (`role_descriptors: {}`) |
+| Role index pattern `logs-windows.sysmon_operational=-*` | Typo in the role UI; matches no index. The CI rule would have silently searched 4688 only | Found via `GET /_security/role/ci-rule-deployer`; fixed before creating the new key |
+
+![MR pipeline error](01-mr-pipeline-yaml-error.png)
+
+![403 rules-read](02-deploy-403-rules-read.png)
+
+![Role with the index typo](03-role-index-typo.png)
+
+![Role fixed](04-role-fixed.png)

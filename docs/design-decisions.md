@@ -4,6 +4,14 @@ Each decision records what was chosen, the alternatives, and why. Newest first.
 
 ---
 
+## DD-030 · Rules reach Kibana only through the pipeline
+
+- **Decision:** `kibana-deploy` upserts every Sigma rule into Kibana from `main`, keyed by the Sigma `id`. Branches only run a dry-run plan. No rule is created or edited by hand in Kibana.
+- **Identity:** a dedicated `ci-deployer` user with role `ci-rule-deployer` (Rules and Exceptions, read on the source indices, own API keys), never `elastic`. Its API key is a masked, protected GitLab variable, so only `main` pipelines can deploy.
+- **Why:** Git becomes the single source of truth; every live rule traces to a reviewed commit; a broken rule can't reach the SIEM without passing lint; a branch can't deploy because it can't read the key.
+- **Consequences accepted:** edits made in Kibana are overwritten on the next deploy (stated in each rule's investigation guide). Changing the role requires a new API key, since keys snapshot their owner's privileges.
+- **Rejected:** Elastic's `detection-rules` CLI (heavier, its own rule format); importing NDJSON exports (no per-rule upsert, harder to review).
+
 ## DD-029 · Pinned toolchain per CI job
 
 - **Decision:** lint and conversion use separate, pinned toolchains on `ctl01`. Lint: sigma-cli 4.0 (pySigma 2.x, current ATT&CK data). Conversion: a venv pinned to sigma-cli 3.1.0, pySigma 1.5.1, `pysigma-backend-elasticsearch` 2.1.1, `pysigma-backend-kusto` 1.0.1.

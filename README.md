@@ -2,7 +2,7 @@
 
 A segmented, Microsoft-style business network built on a single node Proxmox hypervisor, used to emulate attacks, collect telemetry in Elastic Security, and build detections as code (Sigma, Elastic rules,CI/CD).
 
-**Status:** 🟡 Build phase. Network, firewall, Active Directory, Elastic SIEM with Windows telemetry, and the first detection (Scenario 001) are done. The detection-as-code pipeline lints and converts every rule, GitLab mirrors `main` to GitHub, and Scenario 001 went through it twice: revision 2 revealed a bypass in the common `-Encoding` exclusion, revision 3 closed it without any exclusion. Next: a deploy stage to Kibana. SIEM switched from Wazuh to Elastic ([why](docs/2026-10-20-why-elastic-over-wazuh.md)).
+**Status:** 🟡 Build phase. Network, firewall, Active Directory, Elastic SIEM with Windows telemetry, and the first detection (Scenario 001) are done. The detection-as-code pipeline lints and converts every rule, GitLab mirrors `main` to GitHub, and Scenario 001 went through it twice: revision 2 revealed a bypass in the common `-Encoding` exclusion, revision 3 closed it without any exclusion. Rules now deploy to Kibana from the pipeline. SIEM switched from Wazuh to Elastic ([why](docs/2026-10-20-why-elastic-over-wazuh.md)).
 
 ## Goals
 
@@ -14,7 +14,7 @@ A segmented, Microsoft-style business network built on a single node Proxmox hyp
 
 ## Detection-as-code pipeline
 
-🚧 Built: `sigma check` lint gate → automatic EQL/KQL conversion → GitHub push mirror. Not built yet: validate and deploy to Kibana.
+✅ Built: `sigma check` lint gate → automatic EQL/KQL conversion → **deploy to Kibana from `main`** → GitHub push mirror. Rules are never created by hand. Next: ATT&CK mapping and a drift check.
 
 ```mermaid
 flowchart LR
@@ -116,7 +116,8 @@ Detailed diagrams of the bridge, VLAN tagging and traffic flows: [virtual networ
 - [x] Control node `ctl01` + GitLab CE ([build log](00-build/2026-11-02/log.md))
 - [x] GitLab Runner on `ctl01`, first pipeline passed ([build log](00-build/2026-11-04/log.md))
 - [x] Push mirror to GitHub; lint and convert stages ([build log](00-build/2026-11-04/log.md))
-- [ ] Deploy stage to Kibana, drift check
+- [x] Deploy stage to Kibana ([build log](00-build/2026-11-09/log.md))
+- [ ] ATT&CK `threat` mapping, drift check
 - [ ] DMZ target
 
 ## License
