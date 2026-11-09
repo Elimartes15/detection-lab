@@ -1,5 +1,13 @@
 stages: [lint, convert, deploy]
 
+# Branch pipelines only. Without this, jobs with `rules` also start a separate
+# merge request pipeline that lacks the lint/convert jobs (2026-11-09).
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
+    - when: always
+
 variables:
   KIBANA_URL: "http://10.10.60.10:5601"
   # Python from the pinned converter venv (DD-029): has PyYAML and requests
@@ -40,7 +48,7 @@ kibana-deploy-plan:
   stage: deploy
   needs: [sigma-convert]
   rules:
-    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
   script:
     - $DEPLOY_PY ci/deploy_kibana.py --dry-run
 
