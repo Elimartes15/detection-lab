@@ -1,4 +1,17 @@
-stages: [lint, convert]
+stages: [lint, convert, deploy]
+
+# Branch pipelines only. Without this, jobs with `rules` also start a separate
+# merge request pipeline that lacks the lint/convert jobs (2026-11-09).
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
+    - when: always
+
+variables:
+  KIBANA_URL: "http://10.10.60.10:5601"
+  # Python from the pinned converter venv (DD-029): has PyYAML and requests
+  DEPLOY_PY: /home/gitlab-runner/sigma-convert/bin/python
 
 default:
   tags: [ctl01, shell]
@@ -29,3 +42,25 @@ sigma-convert:
   artifacts:
     paths: [converted/]
     expire_in: 30 days
+
+# Branches: build the Kibana rule bodies and print them, no network, no secrets
+kibana-deploy-plan:
+  stage: deploy
+  needs: [sigma-convert]
+  rules:
+    - if: $CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+  script:
+    - $DEPLOY_PY ci/deploy_kibana.py --dry-run
+
+# main only: upsert every rule into Kibana (KIBANA_API_KEY is masked + protected)
+kibana-deploy:
+  stage: deploy
+  needs: [sigma-convert]
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  resource_group: kibana-lab
+  environment:
+    name: kibana-lab
+    url: http://10.0.0.91:5601
+  script:
+    - $DEPLOY_PY ci/deploy_kibana.py
