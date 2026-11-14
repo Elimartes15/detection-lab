@@ -4,6 +4,14 @@ Each decision records what was chosen, the alternatives, and why. Newest first.
 
 ---
 
+## DD-031 · ATT&CK lookup as a pinned file in the repo
+
+- **Decision:** `ci/attack_map.yml` maps Sigma ATT&CK tags to IDs, names and tactics; the deploy script builds Kibana's `threat` field from it. Pinned to the ATT&CK version Kibana bundles (v19.1).
+- **Why:** small, reviewed in merge requests, works offline, and can't change under the pipeline. Adding a technique means looking it up on attack.mitre.org, which is good practice anyway. Same pinning principle as DD-029.
+- **Rule:** an unknown tag, or a technique whose tactic isn't tagged on the rule, fails the pipeline. Silent gaps on the coverage page are worse than a red job.
+- **Rejected:** downloading MITRE's ATT&CK data in CI (about 40 MB, a network dependency, and names that can change between runs).
+- **Revisit:** at around 20 techniques, or when Kibana moves to a newer ATT&CK version (update `attack_version` and re-verify every entry).
+
 ## DD-030 · Rules reach Kibana only through the pipeline
 
 - **Decision:** `kibana-deploy` upserts every Sigma rule into Kibana from `main`, keyed by the Sigma `id`. Branches only run a dry-run plan. No rule is created or edited by hand in Kibana.

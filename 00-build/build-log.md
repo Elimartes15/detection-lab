@@ -2,7 +2,7 @@
 
 Each day's folder holds a **cumulative** `log.md`: everything from day one up to and including that date. The most recent folder is always the full log. Screenshots and command output for a day sit next to its `log.md`.
 
-**Current full log:** [2026-11-09](2026-11-09/log.md)
+**Current full log:** [2026-11-14](2026-11-14/log.md)
 
 | Date | Focus | Highlights | Issues |
 | --- | --- | --- | --- |
@@ -22,5 +22,6 @@ Each day's folder holds a **cumulative** `log.md`: everything from day one up to
 | [2026-11-04](2026-11-04/log.md) | CI/CD + Scenario 001 rev 2 | Runner on `ctl01`, push mirror to GitHub, lint → convert pipeline, first MR-merged rule change, `-Encoding` exclusion bypass found | 6 |
 | [2026-11-07](2026-11-07/log.md) | Scenario 001 rev 3 | Exclusion removed, precise `-EncodedCommand` prefixes, rev 2 bypass now detected (backtest over Nov 1–4) | 2 |
 | [2026-11-09](2026-11-09/log.md) | Deploy stage | Pipeline upserts Sigma rules into Kibana from `main` (least-privilege `ci-deployer`, masked + protected key); first CI-deployed rule live, hand-made rule retired | 4 |
+| [2026-11-14](2026-11-14/log.md) | ATT&CK mapping | Sigma ATT&CK tags mapped to Kibana's `threat` field via a pinned v19.1 lookup; rule appears on the MITRE ATT&CK coverage page | — |
 
 Design choices and their reasoning live in [design decisions](../docs/design-decisions.md).
