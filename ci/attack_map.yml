@@ -1,0 +1,37 @@
+# MITRE ATT&CK lookup for ci/deploy_kibana.py (DD-031)
+#
+# Turns a rule's flat Sigma tags (attack.execution, attack.t1059.001) into
+# Kibana's threat field, which drives the MITRE ATT&CK coverage page.
+#
+# Pinned to the ATT&CK version Kibana bundles, not the latest on the website:
+# the coverage page only recognises IDs in Kibana's own dataset.
+# Verified on attack.mitre.org on 2026-11-14 (site on v20.1; IDs below exist in v19.1).
+#
+# To add a technique: look it up on attack.mitre.org, add its ID, exact name
+# and tactics. Sub-techniques inherit their parent's tactics, so the parent
+# must be listed too.
+
+attack_version: "19.1"
+
+# Keys are the Sigma tag names (attack.<key>)
+tactics:
+  reconnaissance:       {id: TA0043, name: Reconnaissance}
+  resource-development: {id: TA0042, name: Resource Development}
+  initial-access:       {id: TA0001, name: Initial Access}
+  execution:            {id: TA0002, name: Execution}
+  persistence:          {id: TA0003, name: Persistence}
+  privilege-escalation: {id: TA0004, name: Privilege Escalation}
+  stealth:              {id: TA0005, name: Stealth}
+  defense-impairment:   {id: TA0112, name: Defense Impairment}
+  credential-access:    {id: TA0006, name: Credential Access}
+  discovery:            {id: TA0007, name: Discovery}
+  lateral-movement:     {id: TA0008, name: Lateral Movement}
+  collection:           {id: TA0009, name: Collection}
+  command-and-control:  {id: TA0011, name: Command and Control}
+  exfiltration:         {id: TA0010, name: Exfiltration}
+  impact:               {id: TA0040, name: Impact}
+
+techniques:
+  T1027:     {name: Obfuscated Files or Information, tactics: [stealth]}
+  T1059:     {name: Command and Scripting Interpreter, tactics: [execution]}
+  T1059.001: {name: PowerShell}

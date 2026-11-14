@@ -7,6 +7,7 @@ redeploy updates the same rule instead of creating a duplicate (upsert).
 Inputs:
   detections/sigma/**/*.yml   rule metadata (title, level, tags, ...)
   converted/eql/<name>.eql    query produced by the sigma-convert job
+  ci/attack_map.yml           ATT&CK IDs, names and tactics for the threat field
 
 Environment:
   KIBANA_URL       e.g. http://10.10.60.10:5601
@@ -18,12 +19,17 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import sys
 
 import yaml
 
 SIGMA_DIR = pathlib.Path("detections/sigma")
 EQL_DIR = pathlib.Path("converted/eql")
+ATTACK_MAP = pathlib.Path("ci/attack_map.yml")
+ATTACK_URL = "https://attack.mitre.org"
+TECHNIQUE_TAG = re.compile(r"t\d{4}(\.\d{3})?")
+GROUP_OR_SOFTWARE_TAG = re.compile(r"[gs]\d{4}")
 
 # Sigma logsource (product, category) -> Elastic index patterns
 INDEX_MAP = {
@@ -38,7 +44,77 @@ RISK_SCORE = {"informational": 21, "low": 21, "medium": 47,
               "high": 73, "critical": 99}
 
 
-def build_rule(rule_path: pathlib.Path) -> dict:
+def build_threat(tags: list, attack: dict, rule_path: pathlib.Path) -> list:
+    """Turn flat Sigma ATT&CK tags into Kibana's nested threat field.
+
+    Each technique is placed under the tactics it belongs to in ATT&CK *and*
+    that the rule is tagged with. Unknown tags and techniques whose tactics
+    aren't tagged on the rule fail the build instead of being skipped.
+    """
+    tactic_tags, technique_ids, errors = [], [], []
+    for tag in tags:
+        if not tag.startswith("attack."):
+            continue
+        value = tag[len("attack."):].lower()
+        if TECHNIQUE_TAG.fullmatch(value):
+            technique_ids.append(value.upper())
+        elif GROUP_OR_SOFTWARE_TAG.fullmatch(value):
+            continue  # threat groups and software aren't part of Kibana's threat field
+        elif value in attack["tactics"]:
+            tactic_tags.append(value)
+        else:
+            errors.append(f"unknown tactic tag '{tag}': add it to {ATTACK_MAP}")
+
+    techniques = attack["techniques"]
+
+    def tactics_of(tid: str) -> list:
+        entry = techniques[tid]
+        if "tactics" in entry:
+            return entry["tactics"]
+        return techniques[tid.split(".")[0]]["tactics"]  # sub-technique inherits
+
+    tree = {}  # tactic -> {parent technique -> [sub-techniques]}
+    for tid in technique_ids:
+        parent = tid.split(".")[0]
+        missing = [t for t in (tid, parent) if t not in techniques]
+        if missing:
+            errors.append(f"unknown technique {', '.join(dict.fromkeys(missing))}: add it to {ATTACK_MAP}")
+            continue
+        matched = [t for t in tactics_of(tid) if t in tactic_tags]
+        if not matched:
+            expected = ", ".join(f"attack.{t}" for t in tactics_of(tid))
+            errors.append(f"{tid} belongs to {expected}, but the rule isn't tagged with it")
+            continue
+        for tactic in matched:
+            subs = tree.setdefault(tactic, {}).setdefault(parent, [])
+            if "." in tid and tid not in subs:
+                subs.append(tid)
+
+    if errors:
+        sys.exit(f"ERROR: {rule_path}: ATT&CK mapping failed:\n" + "\n".join(f"  - {e}" for e in errors))
+
+    threat = []
+    for tactic in dict.fromkeys(tactic_tags):
+        t = attack["tactics"][tactic]
+        entry = {
+            "framework": "MITRE ATT&CK",
+            "tactic": {"id": t["id"], "name": t["name"], "reference": f"{ATTACK_URL}/tactics/{t['id']}/"},
+            "technique": [],
+        }
+        for parent, subs in tree.get(tactic, {}).items():
+            technique = {"id": parent, "name": techniques[parent]["name"],
+                         "reference": f"{ATTACK_URL}/techniques/{parent}/"}
+            if subs:
+                technique["subtechnique"] = [
+                    {"id": s, "name": techniques[s]["name"],
+                     "reference": f"{ATTACK_URL}/techniques/{s.replace('.', '/')}/"}
+                    for s in subs]
+            entry["technique"].append(technique)
+        threat.append(entry)
+    return threat
+
+
+def build_rule(rule_path: pathlib.Path, attack: dict) -> dict:
     sigma = yaml.safe_load(rule_path.read_text(encoding="utf-8"))
     eql_path = EQL_DIR / f"{rule_path.stem}.eql"
     if not eql_path.exists():
@@ -67,6 +143,7 @@ def build_rule(rule_path: pathlib.Path) -> dict:
         "references": sigma.get("references", []),
         "false_positives": sigma.get("falsepositives", []),
         "tags": ["Sigma", "Detection as code"] + sigma.get("tags", []),
+        "threat": build_threat(sigma.get("tags", []), attack, rule_path),
         "note": (f"Source: `{rule_path.as_posix()}` at commit `{commit}`.\n\n"
                  "Managed by CI: change this rule in Git, not in Kibana. "
                  "Edits made here are overwritten on the next deploy."),
@@ -97,7 +174,8 @@ def main() -> None:
     rules = sorted(SIGMA_DIR.rglob("*.yml"))
     if not rules:
         sys.exit("ERROR: no Sigma rules found")
-    bodies = [build_rule(p) for p in rules]
+    attack = yaml.safe_load(ATTACK_MAP.read_text(encoding="utf-8"))
+    bodies = [build_rule(p, attack) for p in rules]
 
     if args.dry_run:
         for body in bodies:
