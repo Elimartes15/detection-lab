@@ -14,7 +14,7 @@ A segmented, Microsoft-style business network built on a single node Proxmox hyp
 
 ## Detection-as-code pipeline
 
-✅ Built: `sigma check` lint gate → automatic EQL/KQL conversion → **deploy to Kibana from `main`** → GitHub push mirror. Rules are never created by hand. Next: ATT&CK mapping and a drift check.
+✅ Built: `sigma check` lint gate → automatic EQL/KQL conversion → **deploy to Kibana from `main`** → GitHub push mirror. Rules are never created by hand, and each one is mapped to MITRE ATT&CK on Kibana's coverage page. Next: a drift check and a validation stage.
 
 ```mermaid
 flowchart LR
@@ -119,7 +119,8 @@ Detailed diagrams of the bridge, VLAN tagging and traffic flows: [virtual networ
 - [x] GitLab Runner on `ctl01`, first pipeline passed ([build log](00-build/2026-11-04/log.md))
 - [x] Push mirror to GitHub; lint and convert stages ([build log](00-build/2026-11-04/log.md))
 - [x] Deploy stage to Kibana ([build log](00-build/2026-11-09/log.md))
-- [ ] ATT&CK `threat` mapping, drift check
+- [x] ATT&CK mapping to Kibana's coverage page ([build log](00-build/2026-11-14/log.md))
+- [ ] Drift check, validation stage
 - [ ] DMZ target
 
 ## License
